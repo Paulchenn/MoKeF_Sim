@@ -1,6 +1,7 @@
 import numpy as np
 import roboticstoolbox as rtb
 from spatialmath import SE3
+import cv2
 
 class RobotSimulator:
     def __init__(self):
@@ -89,6 +90,37 @@ class RobotSimulator:
         v[valid_mask] = self.f * (Y[valid_mask] / Z[valid_mask]) + self.principal_point[1]
         
         return np.vstack((u, v))
+
+    def get_camera_image(self, texture_img=None):
+        """
+        Rendert ein 2D-Bild der Szene. 
+        Projiziert eine Textur auf das Viereck der Kameraansicht.
+        """
+        # Weißes/Graues Hintergrundbild (640x480)
+        img = np.ones((480, 640, 3), dtype=np.uint8) * 200 
+        
+        # Hole die aktuellen UV-Koordinaten des Objekts
+        uv = self.get_camera_view()
+        dst_pts = uv.T.astype(np.float32) # 4x2 Array für OpenCV
+        
+        # Wenn wir keine Textur übergeben, machen wir ein einfaches Schachbrett
+        if texture_img is None:
+            texture_img = np.zeros((200, 200, 3), dtype=np.uint8)
+            texture_img[0:100, 0:100] = 255
+            texture_img[100:200, 100:200] = 255
+            texture_img[0:100, 100:200] = 100
+            texture_img[100:200, 0:100] = 100
+            
+        h, w = texture_img.shape[:2]
+        src_pts = np.array([[0, 0], [w, 0], [w, h], [0, h]], dtype=np.float32)
+        
+        # Berechne die Transformation von der flachen Textur ins Kamerabild
+        M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+        
+        # Zeichne die Textur in das Kamerabild
+        cv2.warpPerspective(texture_img, M, (640, 480), img, borderMode=cv2.BORDER_TRANSPARENT)
+        
+        return img
 
     def get_pose(self):
         """Gibt die aktuelle Pose für den Plotter zurück"""
