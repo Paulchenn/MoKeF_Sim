@@ -1,0 +1,7 @@
+numpy==1.26.4
+scipy==1.11.4
+matplotlib
+PyQt5           # Für die GUI
+roboticstoolbox-python  # Nimmt dir die schwere Kinematik-Mathe ab
+opencv-python   # Für einfache Bildoperationen/Visualisierung
+spatialmath-python # Gehört zu roboticstoolbox (für Homogene Matrizen SE3)
