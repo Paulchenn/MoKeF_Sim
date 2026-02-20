@@ -70,17 +70,17 @@ class HomographyEKF:
         self.x = flatten_H(H_pred)
         self.P += self.Q
         self.status = "PREDICT"
-        return unflatten_H(self.x)
+        self.H_est = H_pred
 
     def update(self, current_pixels, desired_pixels):
 
         if not self.initialized:
             self.initialize(current_pixels, desired_pixels)
-            return unflatten_H(self.x)
+            return #unflatten_H(self.x)
         
         if current_pixels is None or desired_pixels is None:
             self.status = "MISSING"
-            return unflatten_H(self.x)
+            return #unflatten_H(self.x)
 
         # 1. Messung im normalisierten Raum
         p_curr = self.pixel2norm(current_pixels)
@@ -93,7 +93,7 @@ class HomographyEKF:
 
         if H_meas is None:
             self.status = "MISSING"
-            return unflatten_H(self.x)
+            return #unflatten_H(self.x)
         
         z = flatten_H(H_meas)
         y = z - self.x
@@ -107,7 +107,7 @@ class HomographyEKF:
             if mahalanobis > self.gate_threshold:
                 self.status = "REJECT (GLARE)"
                 # Wir ignorieren die Messung (kein Update von x und P)
-                return unflatten_H(self.x)
+                return #unflatten_H(self.x)
             
         except np.linalg.LinAlgError:
             print("Singuläre Matrix im Filter")
@@ -120,9 +120,10 @@ class HomographyEKF:
         H_upd /= (np.linalg.det(H_upd) + 1e-9)**(1/3)
         self.x = flatten_H(H_upd)
         self.status = "UPDATE"
-        return H_upd
+        self.H_est = H_upd
+        return #H_upd
 
-    def get_projected_points(self, H, desired_pixels):
+    def get_projected_points(self, desired_pixels):
         """Liefert Pixel-Koordinaten zurück"""
         if not self.initialized:
             return desired_pixels
@@ -132,9 +133,9 @@ class HomographyEKF:
         
         # 2. H anwenden
         if self.debug_pints:
-            print("[HomographyEKF][get_projected_points] H:\n", H)
+            print("[HomographyEKF][get_projected_points] H:\n", self.H_est)
             print("[HomographyEKF][get_projected_points] p_des_norm:\n", p_des_norm)
-        p_curr_est_norm = H @ p_des_norm
+        p_curr_est_norm = self.H_est @ p_des_norm
         
         # 3. Zurück in Pixel: p_pixel = K * p_norm
         p_curr_pixel_hom = self.K @ p_curr_est_norm
