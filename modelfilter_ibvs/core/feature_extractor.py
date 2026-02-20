@@ -13,6 +13,10 @@ class BaseExtractor:
 
     def match_current_image(self, img):
         raise NotImplementedError("Muss in der Unterklasse implementiert werden.")
+    
+    def get_reference_coordinates(self):
+        """Gibt die 2xN Koordinaten aller gespeicherten Soll-Punkte zurück."""
+        raise NotImplementedError("Muss in der Unterklasse implementiert werden.")
 
 
 class OrbExtractor(BaseExtractor):
@@ -48,6 +52,11 @@ class OrbExtractor(BaseExtractor):
         pts_curr = np.float32([curr_kp[m.trainIdx].pt for m in good_matches]).reshape(-1, 2).T
         
         return pts_curr, pts_ref
+
+    def get_reference_coordinates(self):
+        if self.ref_kp is None: return None
+        # Liste von KeyPoint-Objekten in ein 2xN Numpy Array wandeln
+        return np.float32([kp.pt for kp in self.ref_kp]).T
 
 
 class XFeatExtractor(BaseExtractor):
@@ -85,9 +94,14 @@ class XFeatExtractor(BaseExtractor):
         pts_curr = curr_kp[idx1].cpu().numpy().T
         
         return pts_curr, pts_ref
+    
+    def get_reference_coordinates(self):
+        if self.ref_kp is None: return None
+        # PyTorch Tensor in ein 2xN Numpy Array wandeln
+        return self.ref_kp.cpu().numpy().T
 
 # Ein Dictionary, um in der GUI einfach über Strings darauf zuzugreifen
 AVAILABLE_EXTRACTORS = {
-    "ORB (Fast/Fallback)": OrbExtractor,
-    "XFeat (CNN/Robust)": XFeatExtractor
+    "XFeat (CNN/Robust)": XFeatExtractor,
+    "ORB (Fast/Fallback)": OrbExtractor
 }

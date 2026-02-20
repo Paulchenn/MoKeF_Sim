@@ -10,12 +10,13 @@
 # Wichtig: Um Pfadfehler zu vermeiden, sollte dieses Skript aus dem Hauptverzeichnis des Projekts gestartet werden (dort, wo auch "sim" und "core" liegen), mit:
 # python -m modelfilter_ibvs.sim.gui_main
 ####################################################################################################
-VERSION = "0.2"
+VERSION = "0.3"
 
 import sys, os, cv2
 import numpy as np
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QComboBox, 
-                             QHBoxLayout, QSlider, QLabel, QGroupBox, QPushButton)
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QSlider, QLabel, QGroupBox, QPushButton, 
+                             QComboBox, QDoubleSpinBox) # <-- QDoubleSpinBox ergänzen
 from PyQt5.QtCore import Qt, QTimer
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -79,7 +80,7 @@ class SimulatorGUI(QMainWindow):
 
     def init_ui(self):
         self.setWindowTitle("IBVS Simulation - Version " + VERSION)
-        self.setGeometry(100, 100, 1200, 800)
+        self.setGeometry(100, 100, 1400, 800)
         
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
@@ -109,11 +110,20 @@ class SimulatorGUI(QMainWindow):
         self.btn_toggle_servo.clicked.connect(self.toggle_servoing)
         self.btn_toggle_servo.setEnabled(False) # Erst aktiv wenn Desired gesetzt
         
+        error_layout = QHBoxLayout()
         self.lbl_error = QLabel("Error: -")
+        error_layout.addWidget(self.lbl_error)
+        error_layout.addWidget(QLabel("Stop Thresh.:"))
+        self.sb_threshold = QDoubleSpinBox()
+        self.sb_threshold.setRange(0.0001, 10.0) # Min/Max Werte
+        self.sb_threshold.setDecimals(4)         # 4 Nachkommastellen
+        self.sb_threshold.setSingleStep(0.001)    # Schrittweite bei Pfeilklick
+        self.sb_threshold.setValue(0.001)         # Dein bisheriger Standardwert
+        error_layout.addWidget(self.sb_threshold)
         
         ibvs_layout.addWidget(self.btn_set_desired)
         ibvs_layout.addWidget(self.btn_toggle_servo)
-        ibvs_layout.addWidget(self.lbl_error)
+        ibvs_layout.addLayout(error_layout) # Dem IBVS-Block hinzufügen
         ibvs_group.setLayout(ibvs_layout)
         right_layout.addWidget(ibvs_group)
 
@@ -212,9 +222,8 @@ class SimulatorGUI(QMainWindow):
         # Speichere es als Referenz im Feature-Extractor
         self.vision.set_reference_image(img)
 
-        # Wir speichern auch die "echten" Ecken für den Filter als Referenz
-        # (Da wir hier in der Sim sind, wissen wir die echten Ecken für das IBVS)
-        self.desired_features = self.sim.get_camera_view()
+        # Wir holen uns die echten XFeat/ORB Punkte als Regler-Ziel!
+        self.desired_features = self.vision.get_reference_coordinates()
 
         self.btn_toggle_servo.setEnabled(True)
         print("Desired View set in Vision System!")
@@ -224,13 +233,12 @@ class SimulatorGUI(QMainWindow):
         self.is_servoing = self.btn_toggle_servo.isChecked()
         if self.is_servoing:
             self.btn_toggle_servo.setText("Stop Servoing")
-            # Deaktiviere Slider während Auto-Mode
             for s in self.sliders: s.setEnabled(False)
+            self.sb_threshold.setEnabled(False) # NEU: Eingabefeld ausgrauen
         else:
             self.btn_toggle_servo.setText("Start Servoing")
-            # Reaktiviere Slider
             for s in self.sliders: s.setEnabled(True)
-            # Slider Positionen updaten auf aktuelle Roboter-Pose
+            self.sb_threshold.setEnabled(True)  # NEU: Eingabefeld wieder freigeben
             self.update_sliders_from_robot()
 
     def manual_slider_change(self):
@@ -305,46 +313,52 @@ class SimulatorGUI(QMainWindow):
         self.filter.predict(v_ee, Z_est, dt) # Wir nutzen v_ee als Annäherung für v_cam
 
         # 3. Update Step (Fusion)
-        if self.current_raw_features is not None:
-            # Wir füttern den Filter mit dem Schwarm an XFeat-Punkten
-            H_est = self.filter.update(self.current_raw_features, self.current_matched_ref)
+        # Wir füttern den Filter mit dem Schwarm an XFeat-Punkten
+        H_est = self.filter.update(self.current_raw_features, self.current_matched_ref)
 
 
-        # # --- ENTSCHEIDUNGSLOGIK ---
+        # --- ENTSCHEIDUNGSLOGIK FÜR DEN REGLER ---
         features_for_control = None
-
-        # # Fall A: Wir wollen den Filter nutzen UND er ist bereit
+        target_for_control = None # WICHTIG: Das dynamische Ziel für den Regler!
+        
+        # Fall A: Wir wollen den Filter nutzen UND er ist bereit
         if self.use_filter and self.filter.initialized:
-            # Regler nutzt VIRTUELL projizierte Proxy-Punkte (die 4 Ecken)
+            # MIT FILTER: Wir nutzen ALLE initialen Keypoints (z.B. 4000 Stück).
+            # Sie werden über die Lie-Gruppe in die aktuelle Ansicht projiziert.
             features_for_control = self.filter.get_projected_points(H_est, self.desired_features)
+            target_for_control = self.desired_features
             self.debug_filtered_pts = features_for_control
-
+            
         # Fall B: Kein Filter gewünscht ODER Filter noch nicht bereit -> Nimm Rohdaten
         elif self.current_raw_features is not None:
-            # Ohne Filter nutzen wir (zum Testen) die wahren Ecken aus der Sim, 
-            # da der Regler feste Proxy-Punkte braucht. 
-            features_for_control = self.sim.get_camera_view()
+            # OHNE FILTER: Wir können nur die Punkte nutzen, die XFeat *gerade jetzt* # gefunden hat (z.B. 50 Stück) und mit ihrem Pendant vergleichen.
+            features_for_control = self.current_raw_features
+            target_for_control = self.current_matched_ref
             self.debug_filtered_pts = None 
             
             if self.use_filter and not self.filter.initialized:
                 self.filter.initialize(self.current_raw_features, self.current_matched_ref)
-        
+
         # Fall C: Glare an, aber Filter war noch nie an -> PANIK
         else:
             print("Verloren! Blendung aktiv, aber Filter nicht initialisiert.")
             self.debug_filtered_pts = None
-            return
-
+            return 
+            
         # 4. Regelung (Nur wenn Servoing aktiv)
         if self.is_servoing:
+            # Wir übergeben das dynamische target_for_control!
             v_cam_cmd, error_norm = self.controller.compute_velocity(
                 features_for_control, 
-                self.desired_features, 
+                target_for_control, 
                 Z_est=Z_est
             )
-            self.lbl_error.setText(f"Error: {error_norm:.4f}")
             
-            # ... (Rest der Kinematik Berechnung wie zuvor) ...
+            # Da wir jetzt viel mehr Punkte haben, ist der Fehler (Norm) absolut 
+            # gesehen viel größer. Wir mitteln den Fehler für die Anzeige/Stopp.
+            avg_error = error_norm / features_for_control.shape[1]
+            self.lbl_error.setText(f"Avg Error: {avg_error:.4f}")
+            
             # Transformiere v_cam_cmd zu v_ee_cmd ...
             # v_ee_cmd berechnen ...
             R = self.sim.T_ee_cam.R; t = self.sim.T_ee_cam.t
@@ -360,21 +374,20 @@ class SimulatorGUI(QMainWindow):
             
             self.sim.update_joints(self.sim.q + q_dot * dt)
 
-            if error_norm < 0.01:
-                print(f"Ziel erreicht! End-Fehler: {error_norm:.4f}")
-                
-                # Servoing intern beenden
+            # NEU: Lese den aktuellen Threshold aus der GUI
+            current_threshold = self.sb_threshold.value()
+            
+            # Passe die Stopp-Bedingung an
+            if avg_error < current_threshold:
+                print(f"Ziel erreicht! End-Fehler (Avg): {avg_error:.4f}")
                 self.is_servoing = False
-                
-                # GUI Button visuell zurücksetzen
                 self.btn_toggle_servo.setChecked(False)
                 self.btn_toggle_servo.setText("2. Start Servoing")
                 
-                # Slider für manuelle Steuerung wieder freigeben
+                self.sb_threshold.setEnabled(True) # NEU: Eingabefeld wieder freigeben
+                
                 for s in self.sliders: 
                     s.setEnabled(True)
-                    
-                # Slider-Positionen auf die aktuelle (jetzt erreichte) Roboterpose updaten
                 self.update_sliders_from_robot()
         else:
             self.current_q_dot = np.zeros(6)
@@ -429,16 +442,32 @@ class SimulatorGUI(QMainWindow):
         # Ziel-Position (Rot)
         if self.desired_features is not None:
             self.ax_cam.plot(self.desired_features[0,:], self.desired_features[1,:], 
-                             'ro', markersize=8, alpha=0.5, label='Target Proxy')
+                             'r.', markersize=2, alpha=0.3, label='Target Keypoints')
             
         # Gefilterte Position (Blaues Kreuz)
         if self.debug_filtered_pts is not None:
             self.ax_cam.plot(self.debug_filtered_pts[0,:], self.debug_filtered_pts[1,:], 
-                             'bx', markersize=10, markeredgewidth=2, label='Filtered Proxy')
+                             'b.', markersize=2, alpha=0.5, label='Filtered Keypoints')
         
         # Reale Ecken (zur Kontrolle, wo sie WIRKLICH sind)
         true_corners = self.sim.get_camera_view()
         self.ax_cam.plot(true_corners[0,:], true_corners[1,:], 'g+', markersize=8, label='True Corners')
+
+        # Status anzeigen
+        status_filter = self.filter.status
+        x_pos = 0.05; y_pos = 0.9
+        if status_filter == "INIT":
+            self.ax_cam.text(x_pos, y_pos, "Filter: INIT (Not Ready)", fontsize=10, bbox=dict(facecolor='yellow'), transform=self.ax_cam.transAxes)
+        elif status_filter == "PREDICT":
+            self.ax_cam.text(x_pos, y_pos, "Filter: PREDICTING", fontsize=10, bbox=dict(facecolor='lightblue'), transform=self.ax_cam.transAxes)
+        elif status_filter == "MISSING":
+            self.ax_cam.text(x_pos, y_pos, "Filter: MISSING (No Data)", fontsize=10, bbox=dict(facecolor='red'), transform=self.ax_cam.transAxes)
+        elif status_filter == "REJECT (GLARE)":
+            self.ax_cam.text(x_pos, y_pos, "Filter: REJECT (Glare)", fontsize=10, bbox=dict(facecolor='red'), transform=self.ax_cam.transAxes)
+        elif status_filter == "UPDATE":
+            self.ax_cam.text(x_pos, y_pos, "Filter: UPDATE", fontsize=10, bbox=dict(facecolor='lightgreen'), transform=self.ax_cam.transAxes)
+        else:
+            self.ax_cam.text(x_pos, y_pos, f"Filter: {status_filter} (UNKNOWN)", fontsize=10, bbox=dict(facecolor='gray'), transform=self.ax_cam.transAxes)
 
         self.ax_cam.legend(loc='upper right', fontsize='small')
         self.canvas.draw()
@@ -461,12 +490,14 @@ class SimulatorGUI(QMainWindow):
     def reset_simulation(self):
         """Setzt die komplette Simulation auf den Startzustand zurück."""
         print("--- Simulation Reset ---")
-        
+
         # 1. IBVS und Regelung stoppen
         self.is_servoing = False
         self.btn_toggle_servo.setChecked(False)
         self.btn_toggle_servo.setText("2. Start Servoing")
         self.btn_toggle_servo.setEnabled(False)
+        
+        self.sb_threshold.setEnabled(True) # NEU: Feld entsperren
         
         # 2. Statusvariablen löschen
         self.desired_features = None
