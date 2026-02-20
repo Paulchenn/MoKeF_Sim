@@ -91,7 +91,7 @@ class RobotSimulator:
         
         return np.vstack((u, v))
 
-    def get_camera_image(self, texture_img=None):
+    def get_camera_image(self, texture_img=None, noise_std=0.0):
         """
         Rendert ein 2D-Bild der Szene. 
         Projiziert eine Textur auf das Viereck der Kameraansicht.
@@ -119,6 +119,16 @@ class RobotSimulator:
         
         # Zeichne die Textur in das Kamerabild
         cv2.warpPerspective(texture_img, M, (640, 480), img, borderMode=cv2.BORDER_TRANSPARENT)
+
+        # NEU: Bildrauschen auf die Pixel anwenden
+        if noise_std > 0:
+            # Rauschen generieren (shape wie img)
+            noise = np.random.normal(0, noise_std * 5, img.shape).astype(np.float32) # *5 damit der Slider mehr Wumms hat
+            img_noisy = img.astype(np.float32) + noise
+            # Werte wieder auf 0-255 clippen
+            img = np.clip(img_noisy, 0, 255).astype(np.uint8)
+            
+        return img
         
         return img
 

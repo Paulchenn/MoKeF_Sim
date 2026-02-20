@@ -3,14 +3,14 @@
 #
 # Autor: Paul Glaser
 #
-# Version 0.1 - Stand 19.02.2026
+# Version 1.0 - Stand 20.02.2026
 # 
 # Ziel: Ein einfacher Simulator mit einem 6-Achs-Roboter, einer Kamera und einem IBVS-Controller. Inklusive eines EKF-Filters für die Homographie-Schätzung.
 #
 # Wichtig: Um Pfadfehler zu vermeiden, sollte dieses Skript aus dem Hauptverzeichnis des Projekts gestartet werden (dort, wo auch "sim" und "core" liegen), mit:
 # python -m modelfilter_ibvs.sim.gui_main
 ####################################################################################################
-VERSION = "0.3"
+VERSION = "1.0"
 
 import sys, os, cv2
 import numpy as np
@@ -26,9 +26,10 @@ import matplotlib.pyplot as plt
 try:
     from modelfilter_ibvs.sim.robot_sim import RobotSimulator
     from modelfilter_ibvs.core.ibvs import IBVSController
-    from modelfilter_ibvs.core.filter_2 import HomographyEKF
+    from modelfilter_ibvs.core.filter_EKF import HomographyEKF
     # from modelfilter_ibvs.core.feature_extractor import FeatureExtractor
     from modelfilter_ibvs.core.feature_extractor import AVAILABLE_EXTRACTORS
+    from modelfilter_ibvs.core.filter import AVAILABLE_FILTERS
 except ImportError:
     path_file = os.path.abspath(__file__)
     path_parent = os.path.dirname(path_file)
@@ -37,9 +38,10 @@ except ImportError:
     sys.path.insert(0, path_grandpaent)
     from sim.robot_sim import RobotSimulator
     from core.ibvs import IBVSController
-    from core.filter_2 import HomographyEKF
+    from modelfilter_ibvs.core.filter_EKF import HomographyEKF
     # from core.feature_extractor import FeatureExtractor
     from core.feature_extractor import AVAILABLE_EXTRACTORS
+    from core.filter import AVAILABLE_FILTERS
 
 class SimulatorGUI(QMainWindow):
     def __init__(self):
@@ -56,8 +58,7 @@ class SimulatorGUI(QMainWindow):
         self.controller = IBVSController(K)
 
         # Filter initialisieren
-        self.filter = HomographyEKF(K, Q_scale=0.0001, R_scale=0.005)
-        self.use_filter = False
+        self.active_filter = None
         self.simulate_glare = False # Wenn True, kommen keine Messdaten mehr
         self.noise_level = 0.0
         
@@ -144,9 +145,14 @@ class SimulatorGUI(QMainWindow):
         filter_group = QGroupBox("Filter & Noise Simulation")
         filter_layout = QVBoxLayout()
         
-        self.cb_use_filter = QPushButton("Enable Filter Prediction")
-        self.cb_use_filter.setCheckable(True)
-        self.cb_use_filter.clicked.connect(self.toggle_filter)
+        # Im Block "Filter & Noise Simulation" (Ersetze den bisherigen Button hiermit)
+        filter_layout.addWidget(QLabel("Tracking Filter:"))
+        
+        self.cb_filter_select = QComboBox()
+        self.cb_filter_select.addItems(list(AVAILABLE_FILTERS.keys()))
+        # Setze Standard auf Homography (Index 1)
+        self.cb_filter_select.setCurrentIndex(0)
+        self.cb_filter_select.currentTextChanged.connect(self.change_filter)
         
         self.cb_glare = QPushButton("SIMULATE GLARE (Blind)")
         self.cb_glare.setCheckable(True)
@@ -159,8 +165,16 @@ class SimulatorGUI(QMainWindow):
         self.sl_noise.setRange(0, 20) # 0 bis 20 Pixel Rauschen
         self.sl_noise.valueChanged.connect(self.set_noise)
         noise_layout.addWidget(self.sl_noise)
+
+        filter_layout.addWidget(self.cb_filter_select)
         
-        filter_layout.addWidget(self.cb_use_filter)
+        # NEU: Ein Container für die dynamischen Parameter des aktiven Filters
+        self.filter_params_group = QGroupBox("Filter Parameters")
+        self.filter_params_layout = QVBoxLayout()
+        self.filter_params_group.setLayout(self.filter_params_layout)
+        filter_layout.addWidget(self.filter_params_group)
+        self.filter_params_group.hide() # Zunächst verstecken, bis ein Filter gewählt ist
+
         filter_layout.addLayout(noise_layout)
         filter_layout.addWidget(self.cb_glare)
         filter_group.setLayout(filter_layout)
@@ -276,12 +290,119 @@ class SimulatorGUI(QMainWindow):
         if hasattr(self, 'is_servoing'):
             self.reset_simulation()
 
+    def change_filter(self, filter_name):
+        FilterClass = AVAILABLE_FILTERS[filter_name]
+        if FilterClass is None:
+            self.active_filter = None
+            print("Filter deaktiviert (-)")
+        else:
+            K = self.sim.get_intrinsic_matrix()
+            self.active_filter = FilterClass(K)
+            print(f"Filter gewechselt zu: {filter_name}")
+            
+        if hasattr(self, 'is_servoing'):
+            self.reset_simulation()
+
+    def change_filter(self, filter_name):
+        FilterClass = AVAILABLE_FILTERS[filter_name]
+        
+        # 1. Altes Layout aufräumen
+        self.clear_layout(self.filter_params_layout)
+        
+        # 2. Filter initialisieren und GUI aufbauen
+        if FilterClass is None:
+            self.active_filter = None
+            self.filter_params_group.hide()
+            print("Filter deaktiviert (-)")
+            
+        else:
+            K = self.sim.get_intrinsic_matrix()
+            self.active_filter = FilterClass(K)
+            self.filter_params_group.show()
+            
+            # -- SPEZIFISCHE PARAMETER FÜR DEN HOMOGRAPHIE-FILTER --
+            if filter_name == "Homography Model (SL3)":
+                h_layout = QHBoxLayout()
+                h_layout.addWidget(QLabel("Alpha (Meas. Trust):"))
+                
+                sb_alpha = QDoubleSpinBox()
+                sb_alpha.setRange(0.0, 1.0)
+                sb_alpha.setSingleStep(0.05)
+                # Setze den Default-Wert aus dem frisch erstellten Filter
+                sb_alpha.setValue(self.active_filter.alpha) 
+                
+                # Lambda-Funktion, um den Wert on-the-fly an den Filter zu senden
+                sb_alpha.valueChanged.connect(lambda val: setattr(self.active_filter, 'alpha', val))
+                
+                h_layout.addWidget(sb_alpha)
+                self.filter_params_layout.addLayout(h_layout)
+                
+            # -- SPEZIFISCHE PARAMETER FÜR DEN EKF --
+            elif filter_name == "Extended Kalman Filter": # <- Passe den String an dein Dictionary an!
+                # Q-Parameter (Prozessrauschen)
+                q_layout = QHBoxLayout()
+                q_layout.addWidget(QLabel("Q (Process Noise):"))
+                sb_q = QDoubleSpinBox()
+                sb_q.setRange(0.0001, 10.0)
+                sb_q.setDecimals(4)
+                sb_q.setSingleStep(0.01)
+                sb_q.setValue(0.0001) # Dein gewünschter Default
+                
+                # R-Parameter (Messrauschen)
+                r_layout = QHBoxLayout()
+                r_layout.addWidget(QLabel("R (Meas. Noise):"))
+                sb_r = QDoubleSpinBox()
+                sb_r.setRange(0.0001, 10.0)
+                sb_r.setDecimals(4)
+                sb_r.setSingleStep(0.01)
+                sb_r.setValue(0.005) # Dein gewünschter Default
+                
+                # R-Parameter (Messrauschen)
+                gate_thresh_layout = QHBoxLayout()
+                gate_thresh_layout.addWidget(QLabel("gate thresh:"))
+                sb_gate_thresh = QDoubleSpinBox()
+                sb_gate_thresh.setRange(1, 100.0)
+                sb_gate_thresh.setDecimals(1)
+                sb_gate_thresh.setSingleStep(1)
+                sb_gate_thresh.setValue(20) # Dein gewünschter Default
+                
+                # Update-Funktion für den EKF
+                def update_ekf_params():
+                    # Hier setzt du die Skalare auf die Matrizen deines EKF um
+                    q_val = sb_q.value()
+                    r_val = sb_r.value()
+                    gate_thresh_val = sb_gate_thresh.value()
+                    # Angenommen, dein EKF hat set_Q und set_R Methoden:
+                    if hasattr(self.active_filter, 'set_Q_R_gate'):
+                        self.active_filter.set_Q_R_gate(q_val, r_val, gate_thresh_val)
+                
+                sb_q.valueChanged.connect(update_ekf_params)
+                sb_r.valueChanged.connect(update_ekf_params)
+                sb_gate_thresh.valueChanged.connect(update_ekf_params)
+                
+                # Einmal initial aufrufen
+                update_ekf_params()
+                
+                q_layout.addWidget(sb_q)
+                r_layout.addWidget(sb_r)
+                gate_thresh_layout.addWidget(sb_gate_thresh)
+                self.filter_params_layout.addLayout(q_layout)
+                self.filter_params_layout.addLayout(r_layout)
+                self.filter_params_layout.addLayout(gate_thresh_layout)
+            
+            print(f"Filter gewechselt zu: {filter_name}")
+            
+        # 3. Simulation zurücksetzen (da neuer Filter keine Historie hat)
+        if hasattr(self, 'is_servoing'):
+            self.reset_simulation()
+
     def control_loop(self):
         if not self.is_servoing or self.desired_features is None:
             if self.desired_features is None: return
 
-        # 1. Datenbeschaffung (Bilder rendern & Keypoints extrahieren)
-        self.current_img = self.sim.get_camera_image()
+        # 1. Datenbeschaffung
+        # Übergebe den Noise Level an das gerenderte Bild (Bilder rendern & Keypoints extrahieren)
+        self.current_img = self.sim.get_camera_image(noise_std=self.noise_level)
         
         if self.simulate_glare:
             # Bei Blendung blenden wir das Bild in der GUI weiß aus
@@ -293,57 +414,42 @@ class SimulatorGUI(QMainWindow):
             raw_curr, raw_des = self.vision.match_current_image(self.current_img)
             self.current_raw_features = raw_curr
             self.current_matched_ref = raw_des
-            
-        # 2. Prediction Step (Immer ausführen, wenn Roboter sich bewegt)
-        # Wir brauchen die Geschwindigkeit. Wenn der Roboter steht -> 0.
-        # Wir nehmen current_q_dot vom letzten Loop.
-        J = self.sim.get_jacobian()
-        v_ee = J @ self.current_q_dot
-        
-        # Kleiner Hack: In der Sim ist Kamera starr am EE, aber Koordinatensystem gedreht.
-        # Korrekterweise müssten wir v_ee in v_cam transformieren.
-        # Für unsere einfachen Tests (Drehen um Z) reicht v_ee ~= v_cam oft aus, 
-        # ABER für die Prediction Formel ist die Achsenrichtung wichtig.
-        # Wir übergeben den Twist und lassen den Filter arbeiten (dort haben wir das Minuszeichen gesetzt).
-        dt = 0.05
+
+        # 2. Filter Update (Nur wenn ein Filter aktiv ist!)
         Z_est = self.sim.get_mean_depth()
-        if self.debug_prints:
-            print("[GUI_MAIN][control_loop] v_ee (Twist): ", v_ee)
-            print("[GUI_MAIN][control_loop] Z_est: ", Z_est)
-        self.filter.predict(v_ee, Z_est, dt) # Wir nutzen v_ee als Annäherung für v_cam
+        J = self.sim.get_jacobian()
+        dt = 0.05
+        if self.active_filter is not None:
+            v_ee = J @ self.current_q_dot
+            self.active_filter.predict(v_ee, Z_est, dt=dt) 
+            if self.debug_prints:
+                print("[GUI_MAIN][control_loop] v_ee (Twist): ", v_ee)
+                print("[GUI_MAIN][control_loop] Z_est: ", Z_est)
 
-        # 3. Update Step (Fusion)
-        # Wir füttern den Filter mit dem Schwarm an XFeat-Punkten
-        H_est = self.filter.update(self.current_raw_features, self.current_matched_ref)
+            self.active_filter.update(self.current_raw_features, self.current_matched_ref)
 
-
-        # --- ENTSCHEIDUNGSLOGIK FÜR DEN REGLER ---
+        # 3. ENTSCHEIDUNGSLOGIK FÜR DEN REGLER
         features_for_control = None
-        target_for_control = None # WICHTIG: Das dynamische Ziel für den Regler!
+        target_for_control = None
         
         # Fall A: Wir wollen den Filter nutzen UND er ist bereit
-        if self.use_filter and self.filter.initialized:
+        if self.active_filter is not None and self.active_filter.initialized:
             # MIT FILTER: Wir nutzen ALLE initialen Keypoints (z.B. 4000 Stück).
-            # Sie werden über die Lie-Gruppe in die aktuelle Ansicht projiziert.
-            features_for_control = self.filter.get_projected_points(H_est, self.desired_features)
+            features_for_control = self.active_filter.get_projected_points(self.desired_features)
             target_for_control = self.desired_features
             self.debug_filtered_pts = features_for_control
             
         # Fall B: Kein Filter gewünscht ODER Filter noch nicht bereit -> Nimm Rohdaten
         elif self.current_raw_features is not None:
-            # OHNE FILTER: Wir können nur die Punkte nutzen, die XFeat *gerade jetzt* # gefunden hat (z.B. 50 Stück) und mit ihrem Pendant vergleichen.
+            # Kein Filter (oder noch nicht init) -> Nutze Rohdaten
             features_for_control = self.current_raw_features
             target_for_control = self.current_matched_ref
             self.debug_filtered_pts = None 
             
-            if self.use_filter and not self.filter.initialized:
-                self.filter.initialize(self.current_raw_features, self.current_matched_ref)
-
-        # Fall C: Glare an, aber Filter war noch nie an -> PANIK
         else:
-            print("Verloren! Blendung aktiv, aber Filter nicht initialisiert.")
+            print("Verloren! Blendung aktiv, aber kein Filter vorhanden.")
             self.debug_filtered_pts = None
-            return 
+            return
             
         # 4. Regelung (Nur wenn Servoing aktiv)
         if self.is_servoing:
@@ -454,20 +560,23 @@ class SimulatorGUI(QMainWindow):
         self.ax_cam.plot(true_corners[0,:], true_corners[1,:], 'g+', markersize=8, label='True Corners')
 
         # Status anzeigen
-        status_filter = self.filter.status
         x_pos = 0.05; y_pos = 0.9
-        if status_filter == "INIT":
-            self.ax_cam.text(x_pos, y_pos, "Filter: INIT (Not Ready)", fontsize=10, bbox=dict(facecolor='yellow'), transform=self.ax_cam.transAxes)
-        elif status_filter == "PREDICT":
-            self.ax_cam.text(x_pos, y_pos, "Filter: PREDICTING", fontsize=10, bbox=dict(facecolor='lightblue'), transform=self.ax_cam.transAxes)
-        elif status_filter == "MISSING":
-            self.ax_cam.text(x_pos, y_pos, "Filter: MISSING (No Data)", fontsize=10, bbox=dict(facecolor='red'), transform=self.ax_cam.transAxes)
-        elif status_filter == "REJECT (GLARE)":
-            self.ax_cam.text(x_pos, y_pos, "Filter: REJECT (Glare)", fontsize=10, bbox=dict(facecolor='red'), transform=self.ax_cam.transAxes)
-        elif status_filter == "UPDATE":
-            self.ax_cam.text(x_pos, y_pos, "Filter: UPDATE", fontsize=10, bbox=dict(facecolor='lightgreen'), transform=self.ax_cam.transAxes)
+        if self.active_filter is not None:
+            status_filter = self.active_filter.status
+            if status_filter == "INIT":
+                self.ax_cam.text(x_pos, y_pos, "Filter: INIT (Not Ready)", fontsize=10, bbox=dict(facecolor='yellow'), transform=self.ax_cam.transAxes)
+            elif status_filter == "PREDICT":
+                self.ax_cam.text(x_pos, y_pos, "Filter: PREDICTING", fontsize=10, bbox=dict(facecolor='lightblue'), transform=self.ax_cam.transAxes)
+            elif status_filter == "MISSING":
+                self.ax_cam.text(x_pos, y_pos, "Filter: MISSING (No Data)", fontsize=10, bbox=dict(facecolor='red'), transform=self.ax_cam.transAxes)
+            elif status_filter == "REJECT (GLARE)":
+                self.ax_cam.text(x_pos, y_pos, "Filter: REJECT (Glare)", fontsize=10, bbox=dict(facecolor='red'), transform=self.ax_cam.transAxes)
+            elif status_filter == "UPDATE":
+                self.ax_cam.text(x_pos, y_pos, "Filter: UPDATE", fontsize=10, bbox=dict(facecolor='lightgreen'), transform=self.ax_cam.transAxes)
+            else:
+                self.ax_cam.text(x_pos, y_pos, f"Filter: {status_filter} (UNKNOWN)", fontsize=10, bbox=dict(facecolor='gray'), transform=self.ax_cam.transAxes)
         else:
-            self.ax_cam.text(x_pos, y_pos, f"Filter: {status_filter} (UNKNOWN)", fontsize=10, bbox=dict(facecolor='gray'), transform=self.ax_cam.transAxes)
+            self.ax_cam.text(x_pos, y_pos, f"Filter: NONE", fontsize=10, bbox=dict(facecolor='lightgray'), transform=self.ax_cam.transAxes)
 
         self.ax_cam.legend(loc='upper right', fontsize='small')
         self.canvas.draw()
@@ -506,14 +615,12 @@ class SimulatorGUI(QMainWindow):
         self.debug_filtered_pts = None
         
         # 3. Filter und Störgrößen zurücksetzen
-        self.filter.reset()
+        if self.active_filter is not None:
+            self.active_filter.reset()
         self.sl_noise.setValue(0)
         
         self.cb_glare.setChecked(False)
         self.toggle_glare() # Logik ausführen
-        
-        self.cb_use_filter.setChecked(False)
-        self.toggle_filter() # Logik ausführen
         
         # 4. Roboter auf Startpose (qn) zurücksetzen
         initial_q = self.sim.robot.myq_start.copy() # Startpose aus RobotSimulator
@@ -530,6 +637,13 @@ class SimulatorGUI(QMainWindow):
             
         # 6. Alles neu zeichnen
         self.update_plots()
+
+    def clear_layout(self, layout):
+        """Löscht alle Widgets aus einem Layout."""
+        while layout.count():
+            child = layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
