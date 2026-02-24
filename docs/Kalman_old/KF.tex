@@ -1,0 +1,79 @@
+\documentclass[11pt, a4paper]{article}
+
+% Pakete für Mathematik und Formatierung
+\usepackage[utf8]{inputenc}
+\usepackage[ngerman]{babel}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{geometry}
+\usepackage{xcolor}
+
+% Seiteneinstellungen
+\geometry{margin=2.5cm}
+\parindent0pt
+\parskip6pt
+
+\title{Expert-Notes: Vom 1D-Kalman-Filter zum ESKF \\ \large Projekt: ModelFilterIBVS}
+\author{Dokumentation der mathematischen Herleitung}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Einführung: Das 1D-Kinematik-Beispiel}
+Ein greifbares Beispiel ist der beste Weg, um die abstrakte Mathematik des Kalman-Filters zu entmystifizieren. Wir betrachten einen Roboter auf einer 1D-Schiene. Unser \textbf{Zustandsvektor} $x_k$ besteht aus Position $p$ und Geschwindigkeit $v$:
+\[ x_k = \begin{bmatrix} p_k \\ v_k \end{bmatrix} \]
+Der Filter speichert diesen Zustand und die \textbf{Fehlerkovarianzmatrix} $P_k$ (Unsicherheit).
+
+\subsection{Schritt 1: Die Prädiktion (Vorhersage)}
+Wir nutzen unser physikalisches Modell, um "`blind"' in die Zukunft zu rechnen:
+\begin{enumerate}
+    \item \textbf{Zustandsextrapolation:} $x_{k|k-1} = F x_{k-1|k-1} + B u_k$ \\
+    Bei konstanter Geschwindigkeit für ein Intervall $\Delta t$ ist $F = \begin{bmatrix} 1 & \Delta t \\ 0 & 1 \end{bmatrix}$. $B u_k$ (Steuerung) setzen wir hier auf 0.
+    \item \textbf{Kovarianzextrapolation:} $P_{k|k-1} = F P_{k-1|k-1} F^T + Q$ \\
+    Die Unsicherheit wächst durch das Prozessrauschen $Q$ (z. B. Wind).
+\end{enumerate}
+
+\subsection{Schritt 2: Die Korrektur (Update)}
+Fusion der Vorhersage mit einer Sensormessung $z_k$:
+\begin{enumerate}
+    \item \textbf{Kalman-Gain:} $K_k = P_{k|k-1} H^T (H P_{k|k-1} H^T + R)^{-1}$ \\
+    Dynamischer Gewichtungsfaktor: Vertraue ich dem Modell ($P$) oder dem Sensor ($R$)?
+    \item \textbf{Zustandsupdate:} $x_{k|k} = x_{k|k-1} + K_k (z_k - H x_{k|k-1})$ \\
+    Die \textit{Innovation} (Differenz Messung zu Erwartung) korrigiert die Vorhersage.
+    \item \textbf{Kovarianzupdate:} $P_{k|k} = (I - K_k H) P_{k|k-1}$
+\end{enumerate}
+
+\section{Erweiterung auf n Dimensionen}
+Der Standard Kalman-Filter funktioniert problemlos auch im 3D- oder n-dimensionalen Raum. Die Dimensionalität ändert am Ablauf nichts; die Vektoren werden lediglich länger. Im \textbf{3D-Raum} (x, y, z) gilt:
+\[ x_k = \begin{bmatrix} p_x & p_y & p_z & v_x & v_y & v_z \end{bmatrix}^T \]
+Matrizen wie $F$ und $P$ wachsen entsprechend auf $6 \times 6$.
+
+\section{Die Grenzen der Linearität im Projekt-Kontext}
+Obwohl der Filter 3D-Positionen gut schätzt, stößt er bei der Schätzung einer \textbf{Homographie-Matrix} $H \in \mathbb{R}^{3 \times 3}$ an eine harte Grenze.
+
+\subsection{Das Problem der projektiven Geometrie}
+In der projektiven Geometrie gilt $p(t) \propto H(t) p^*$. Das bedeutet: $H$ und ein Vielfaches (z. B. $2H$) beschreiben dieselbe Transformation. Um Eindeutigkeit für den Filter zu schaffen, normalisieren wir die Matrix so, dass gilt:
+\[ \det(H) = 1 \]
+Damit liegt $H$ in der \textbf{Speziellen Linearen Gruppe $SL(3)$}.
+
+\subsection{Warum der Standard-Filter hier versagt}
+Eine Lie-Gruppe wie $SL(3)$ ist kein flacher Vektorraum, sondern eine gekrümmte \textbf{Mannigfaltigkeit}. Die lineare Addition ist hier nicht abgeschlossen.
+
+Wenn $A, B \in SL(3)$, dann gilt meistens:
+\[ \det(A + B) \neq 1 \]
+Nutzt man das Standard-Update $H_{neu} = H_{alt} + \Delta H$, wird die Gruppenstruktur zerstört. Die Matrix verliert ihre geometrische Bedeutung.
+
+\section{Die Lösung: Error-State Kalman Filter (ESKF)}
+Da wir nicht addieren ($+$) dürfen, müssen wir multiplizieren ($\cdot$). Die Dynamik wird auf dem Tangentialraum der Gruppe, der \textbf{Lie-Algebra $\mathfrak{sl}(3)$}, modelliert.
+
+Der ESKF trennt den Zustand elegant:
+\begin{itemize}
+    \item \textbf{Nominaler Zustand:} Die Homographie auf der gekrümmten $SL(3)$-Gruppe.
+    \item \textbf{Error-State (Fehlerzustand):} Ein lokales Update auf dem flachen Tangentialraum $\mathfrak{sl}(3)$, auf dem wir wieder linear rechnen können.
+\end{itemize}
+Dieses Prinzip ist für das Projekt \textbf{ModelFilterIBVS} essenziell, um Bild-Ausfälle (Blendung) durch die Roboterkinematik stabil zu überbrücken.
+
+\end{document}
