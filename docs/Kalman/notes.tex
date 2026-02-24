@@ -1,0 +1,329 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[ngerman]{babel}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+
+\begin{document}
+
+\section{Der Standard Kalman-Filter für 2D-Feature-Tracking}
+\label{sec:standard_kf}
+
+Der Standard Kalman-Filter (KF) ist ein optimaler rekursiver Schätzer für lineare Systeme unter Einfluss von Gaußschem Rauschen. Für das Tracking von Keypoints im Bildraum $(u, v)$ mittels eines Constant-Velocity (CV) Modells definieren wir den Zustandsvektor $\mathbf{x}_k$ zum Zeitpunkt $k$ als:
+
+\begin{equation}
+    \mathbf{x}_k = \begin{bmatrix} u_k \\ v_k \\ \dot{u}_k \\ \dot{v}_k \end{bmatrix}
+\end{equation}
+
+Der Filter arbeitet nun in zwei rekursiven Schritten: Prädiktion (\textit{a priori} Schätzung) und Korrektur (\textit{a posteriori} Schätzung). Wir verwenden die Notation $\mathbf{x}_{k|k-1}$, was bedeutet: „Der geschätzte Zustand zum Zeitpunkt $k$, basierend auf dem Wissen bis zum Zeitpunkt $k-1$„.
+
+\subsection{Prädiktion (Predict)}
+In diesem Schritt wird der Zustand basierend auf dem Systemmodell in die Zukunft projiziert. Die Matrix $F$ beschreibt die lineare Kinematik (bei konstanter Geschwindigkeit gilt $u_k=u_{k-1}+\dot{u}_{k-1}\Delta t$). $Q$ ist die Prozessrauschkovarianz (Modellunsicherheit).
+
+\begin{enumerate}
+    \item Zustand $\mathbf{x}_{k|k-1}$ prädizieren:
+        \begin{equation}
+            \mathbf{x}_{k|k-1} = F \mathbf{x}_{k-1|k-1}
+        \end{equation}
+    \item Fehlerkovarianz $P_{k|k-1}$ prädizieren (Unsicherheit unserer Schätzung):
+        \begin{equation}
+            P_{k|k-1} = F P_{k-1|k-1} F^T + Q
+        \end{equation}
+\end{enumerate}
+
+Für das 2D-CV-Modell mit der Zeitschrittweite $\Delta t$ gilt die Systemmatrix $F$:
+\begin{equation}
+    F = \begin{bmatrix} 
+    1 & 0 & \Delta t & 0 \\ 
+    0 & 1 & 0 & \Delta t \\ 
+    0 & 0 & 1 & 0 \\ 
+    0 & 0 & 0 & 1 
+    \end{bmatrix}
+\end{equation}
+
+$Q$ (Prozessrauschkovarianz): Dies ist ein Tuning-Parameter. Er modelliert externe Einflüsse, die unser CV-Modell verletzen (z. B. plötzliche Beschleunigungen des Objekts oder der Kamera). Je höher Q, desto weniger vertraut der Filter seinem eigenen physikalischen Modell.
+
+\subsection{Korrektur (Update)}
+Sobald eine neue Messung (nur die Pixelkoordinaten, nicht die Geschwindigkeiten)
+\begin{equation}
+    \mathbf{z}_k = \begin{bmatrix} u_{\text{gemessen}}\\ v_{\text{gemessen}} \end{bmatrix}
+\end{equation}
+(z.\,B. von \textit{xfeat}) vorliegt, wird die Prädiktion korrigiert. Die Messmatrix $H$ projiziert den Zustandsraum in den Messraum, $R$ ist die Messrauschkovarianz (Unsicherheit der Kamera/des Matchers).
+
+\begin{enumerate}
+    \item Innovation (Residuum) berechnen:
+        \begin{equation}
+            \tilde{\mathbf{y}}_k = \mathbf{z}_k - H \mathbf{x}_{k|k-1}
+        \end{equation}
+        \begin{itemize}
+            \item $H$ (Messmatrix): Übersetzt den theoretischen Zustand in den Messraum (blendet hier die Geschwindigkeiten aus, da die Kamera sie nicht direkt misst).
+            \begin{equation}
+                H = \begin{bmatrix} 
+                1 & 0 & 0 & 0 \\ 
+                0 & 1 & 0 & 0 
+                \end{bmatrix}
+            \end{equation}
+            \item $\tilde{\mathbf{y}}_k$: Ist die Differenz zwischen dem, was \textit{xfeat} sieht, und dem, was der Filter erwartet hat.
+        \end{itemize}
+    \item Innovationskovarianz berechnen:
+        \begin{equation}
+            S_k = H P_{k|k-1} H^T + R
+        \end{equation}
+        \begin{itemize}
+            \item $R$ (Messrauschkovarianz): Beschreibt, wie stark die Keypoints von xfeat zittern. Das ist dein zweiter großer Tuning-Parameter. Ist R groß, vertraut der Filter der Messung wenig.
+        \end{itemize}
+    \item Kalman-Verstärkung (Kalman Gain) berechnen:
+        \begin{equation}
+            K_k = P_{k|k-1} H^T S_k^{-1}
+        \end{equation}
+        \begin{itemize}
+            \item $K_k$: Das ist das "Herzstück". Der Kalman-Gain bestimmt, wie stark das Residuum $\tilde{\mathbf{y}}_k$ gewichtet wird. Ist die Messung sehr sicher (R klein), wird K groß. Ist das Modell sehr sicher (P klein), wird K klein.
+        \end{itemize}
+    \item Zustand aktualisieren:
+        \begin{equation}
+            \mathbf{x}_{k|k} = \mathbf{x}_{k|k-1} + K_k \tilde{\mathbf{y}}_k
+        \end{equation}
+        \begin{itemize}
+            \item $\mathbf{x}_{k|k}$: Das ist dein final geglätteter Wert, den du an deine IBVS-Regelung weitergibst.
+        \end{itemize}
+    \item Fehlerkovarianz aktualisieren:
+        \begin{equation}
+            P_{k|k} = (I - K_k H) P_{k|k-1}
+        \end{equation}
+        \begin{itemize}
+            \item Die Unsicherheit sinkt, da nun eine neue Messung verarbeitet wurde. ($I$ ist die Einheitsmatrix).
+        \end{itemize}
+\end{enumerate}
+
+\subsection{Bedeutung das für das IBVS-Projekt und Limitationen}
+Wenn \textit{xfeat} ausfällt (Okklusion), wird der Update-Schritt übersprungen und nutzt für ein paar Frames nur den Predict-Schritt ($\mathbf{x}_{k|k} = \mathbf{x}_{k|k-1}$). Der Roboter folgt dem Objekt mit der zuletzt berechneten konstanten Geschwindigkeit weiter, bis xfeat den Keypoint wiederfindet.
+
+Das obige Modell funktioniert für ein simples Tracking im 2D-Bildraum. Im IBVS-Projekt muss jedoch die 3D-Welt, die Kamerabewegung oder die Roboterkinematik miteinbezogen werden. Dadurch stößt der konventionelle KF an ein Grenze: Dieser setzt strikt lineare System- ($F$) und Messmodelle ($H$) voraus.
+
+In der realen Robotik und Computervision ist jedoch fast alles nichtlinear:
+\begin{itemize}
+    \item Das Kameramodell (Pinhole Camera): Die Projektion eines 3D-Punktes ($X$,$Y$,$Z$) auf ein 2D-Pixel ($u$,$v$) erfordert eine Division durch die Tiefe $Z$. Eine Division durch eine Zustandsvariable ist eine nichtlineare Operation.
+    \item Roboterkinematik: Wenn Gelenkwinkel in Endeffektor-Positionen (und damit Kamerapositionen) umgerechnet werden, wird Sinus und Kosinus genutzt (ebenfalls hochgradig nichtlinear).
+\end{itemize}
+
+Wenn eine Gauß-Verteilung (Kovarianz $P$) durch eine nichtlineare Funktion geleitet wird, ist das Ergebnis keine Gauß-Verteilung mehr. Der Standard-Filter würde schnell divergieren (die Spur verlieren).
+
+
+\section{Der Extended Kalman Filter (EKF) und Linearisierung}
+\label{sec:ekf}
+
+Sobald das Systemmodell oder das Messmodell nichtlinear werden -- was in der visuellen Robotik (IBVS) aufgrund von Kameramodellen und Rotationskinematik der Regelfall ist -- versagt der Standard Kalman-Filter. Der Extended Kalman Filter (EKF) löst dies durch eine lokale Linearisierung mittels einer Taylorreihenentwicklung erster Ordnung.
+
+Die konstanten Matrizen $F$ und $H$ werden durch nichtlineare Funktionen $f(x)$ und $h(x)$ ersetzt. Der EKF berechnet in jedem Zeitschritt $k$ die zugehörigen Jacobi-Matrizen (partielle Ableitungen) $F_k$ und $H_k$, evaluiert am aktuellen Schätzpunkt.
+
+\subsection{EKF Prädiktion und Update}
+Die Prädiktion des Zustands erfolgt direkt über die nichtlineare Systemfunktion $f$:
+\begin{align}
+    x_{k|k-1} &= f(x_{k-1|k-1}, u_k) \\
+    P_{k|k-1} &= F_k P_{k-1|k-1} F_k^T + Q
+\end{align}
+
+Die Korrektur nutzt die nichtlineare Messfunktion $h$ für das Residuum und die Jacobi-Matrix $H_k$ für die Kovarianz- und Gain-Berechnung:
+\begin{align}
+    \tilde{y}_k &= z_k - h(x_{k|k-1}) \\
+    S_k &= H_k P_{k|k-1} H_k^T + R \\
+    K_k &= P_{k|k-1} H_k^T S_k^{-1} \\
+    x_{k|k} &= x_{k|k-1} + K_k \tilde{y}_k \\
+    P_{k|k} &= (I - K_k H_k) P_{k|k-1}
+\end{align}
+
+\subsection{Beispiel: Jacobi-Matrix eines Lochkameramodells}
+Projiziert man einen 3D-Punkt $x = [X, Y, Z]^T$ auf eine Bildebene $(u,v)$, lautet die nichtlineare Messfunktion $h(x)$ unter Annahme der Brennweiten $f_x, f_y$ und des Hauptpunktes $(c_x, c_y)$:
+\begin{equation}
+    h(x) = \begin{bmatrix} f_x \frac{X}{Z} + c_x \\ f_y \frac{Y}{Z} + c_y \end{bmatrix}
+\end{equation}
+
+Da die Division durch den Zustand $Z$ eine Nichtlinearität darstellt, bilden wir die Jacobi-Matrix $H_k = \frac{\partial h}{\partial x}$:
+\begin{equation}
+    H_k = \begin{bmatrix} 
+    \frac{\partial u}{\partial X} & \frac{\partial u}{\partial Y} & \frac{\partial u}{\partial Z} \\ 
+    \frac{\partial v}{\partial X} & \frac{\partial v}{\partial Y} & \frac{\partial v}{\partial Z} 
+    \end{bmatrix} 
+    = \begin{bmatrix} 
+    \frac{f_x}{Z} & 0 & -f_x \frac{X}{Z^2} \\ 
+    0 & \frac{f_y}{Z} & -f_y \frac{Y}{Z^2} 
+    \end{bmatrix}
+\end{equation}
+Diese Matrix $H_k$ wird in jedem Frame mit den aktuellen Schätzwerten für $X$, $Y$ und $Z$ neu evaluiert und in den Update-Gleichungen verwendet.
+
+
+\section{Der Unscented Kalman Filter (UKF)}
+\label{sec:ukf}
+
+Der Extended Kalman Filter (EKF) verliert an Genauigkeit, wenn die System- oder Messmodelle stark nichtlinear sind, da die Linearisierung mittels Jacobi-Matrizen (Taylor-Entwicklung 1. Ordnung) nur lokal gültig ist. Der Unscented Kalman Filter (UKF), basierend auf der Arbeit von Julier und Uhlmann (1997), umgeht dieses Problem durch die \textit{Unscented Transform} (UT).
+
+Das Kernkonzept des UKF ist es, nicht die Funktion zu approximieren, sondern die Wahrscheinlichkeitsverteilung.
+
+\subsection{Die Unscented Transform (UT) und Sigma-Punkte}
+Für einen $n$-dimensionalen Zustandsvektor $x$ mit Mittelwert $\mu$ und Kovarianz $P$ wählt der UKF deterministisch $2n + 1$ sogenannte Sigma-Punkte $\mathcal{X}^{(i)}$ aus. Diese Punkte repräsentieren die Verteilung exakt bis zur zweiten Ordnung (Mittelwert und Kovarianz).
+
+Die Berechnung der Sigma-Punkte erfolgt typischerweise über die Matrixwurzel der Kovarianzmatrix (z.~B. mittels Cholesky-Zerlegung):
+\begin{align}
+    \mathcal{X}^{(0)} &= \mu \\
+    \mathcal{X}^{(i)} &= \mu + \left( \sqrt{(n + \lambda) P} \right)_i \quad \text{für } i = 1, \dots, n \\
+    \mathcal{X}^{(i)} &= \mu - \left( \sqrt{(n + \lambda) P} \right)_{i-n} \quad \text{für } i = n+1, \dots, 2n
+\end{align}
+Dabei ist $\lambda$ ein Skalierungsparameter, der die Streuung der Sigma-Punkte um den Mittelwert steuert, und der Index $i$ bezeichnet die $i$-te Spalte der Matrixwurzel.
+
+Jedem Sigma-Punkt $\mathcal{X}^{(i)}$ werden Gewichte für den Mittelwert $W_m^{(i)}$ und für die Kovarianz $W_c^{(i)}$ zugeordnet.
+
+\subsection{Prädiktion und Update ohne Linearisierung}
+Anstatt Jacobi-Matrizen zu berechnen, werden die Sigma-Punkte direkt durch die nichtlinearen Funktionen $f$ (Systemmodell) oder $h$ (Messmodell) propagiert. Für das Messmodell (wie unser Kameramodell im IBVS) bedeutet das:
+\begin{equation}
+    \mathcal{Z}^{(i)} = h(\mathcal{X}^{(i)})
+\end{equation}
+
+Der prädizierte Messmittelwert $\hat{z}$ und die zugehörige Kovarianz $S$ ergeben sich dann einfach als gewichtete Summe der transformierten Punkte:
+\begin{align}
+    \hat{z} &= \sum_{i=0}^{2n} W_m^{(i)} \mathcal{Z}^{(i)} \\
+    S &= \sum_{i=0}^{2n} W_c^{(i)} (\mathcal{Z}^{(i)} - \hat{z})(\mathcal{Z}^{(i)} - \hat{z})^T + R
+\end{align}
+
+\textbf{Fazit für IBVS-Anwendungen:} Der UKF eliminiert die Notwendigkeit fehleranfälliger analytischer Ableitungen für komplexe Kameraprojektionen und Roboterkinematiken. Er liefert bei starken Nichtlinearitäten eine präzisere Schätzung als der EKF, ist jedoch rechnerisch oft etwas aufwendiger, da $2n+1$ Punkte pro Zeitschritt propagiert werden müssen.
+
+\section{Der Error-State Kalman Filter (ESKF)}
+\label{sec:eskf}
+
+Für Systeme, die 3D-Rotationen beinhalten (z.~B. freifliegende Kameras im IBVS-Kontext), führt der Standard-EKF aufgrund der Überparametrisierung von Quaternionen (4 Parameter für 3 Freiheitsgrade) zu singulären Kovarianzmatrizen und der Verletzung der Einheitslängen-Bedingung bei der Zustandsaktualisierung. Der Error-State Kalman Filter (ESKF) löst dies, indem er den Zustand aufteilt:
+
+\begin{equation}
+    x_t = x \oplus \delta x
+\end{equation}
+
+Hierbei ist $x_t$ der wahre Zustand, $x$ der Nominalzustand (Integration der Systemkinematik ohne Rauschen) und $\delta x$ der Fehlerzustand (Error-State). Der Operator $\oplus$ steht für die Zustandskomposition (Addition für Translationen, Multiplikation für Quaternionen). Der Filter schätzt \textit{ausschließlich} den Fehlerzustand $\delta x$, der für Rotationen minimal parametrisiert werden kann (als 3D-Vektor $\delta \theta$).
+
+\subsection{ESKF Prädiktion (Predict)}
+Der Nominalzustand $x$ wird analog zum EKF deterministisch und rauschfrei über das nichtlineare Systemmodell $f$ propagiert:
+\begin{equation}
+    x_{k|k-1} = f(x_{k-1|k-1}, u_k)
+\end{equation}
+
+Die Prädiktion des Fehlerzustands ist im Erwartungswert Null ($\delta x_{k|k-1} = 0$). Die Fehler-Kovarianz $P$ wächst jedoch basierend auf der Fehler-Kinematik:
+\begin{equation}
+    P_{k|k-1} = F_{\delta x} P_{k-1|k-1} F_{\delta x}^T + F_i Q F_i^T
+\end{equation}
+Dabei ist $F_{\delta x}$ die Jacobi-Matrix der zeitdiskreten Fehlerkinematik ($F_{\delta x} = \frac{\partial f_{\delta x}}{\partial \delta x}$) und $F_i$ die Rausch-Eingangsmatrix, die das Prozessrauschen $Q$ (z.~B. IMU-Rauschen) korrekt in den Zustandsraum mappt.
+
+\subsection{ESKF Korrektur (Update) und die Kettenregel}
+Liegt eine Messung $z_k$ vor, wird das Residuum $\tilde{y}_k$ bezüglich des unkorrigierten Nominalzustands mittels der Standard-Messfunktion $h(x)$ gebildet:
+\begin{equation}
+    \tilde{y}_k = z_k - h(x)
+\end{equation}
+
+Da der Kalman-Filter den Fehlerzustand schätzt, muss die Mess-Jacobi-Matrix $H_{\delta x}$ nach dem Fehlerzustand abgeleitet werden. Dies erfolgt über die Kettenregel:
+\begin{equation}
+    H_{\delta x} = \frac{\partial h(x_t)}{\partial \delta x} = \underbrace{\frac{\partial h}{\partial x_t}}_{H_x} \cdot \underbrace{\frac{\partial x_t}{\partial \delta x}}_{X_{\delta x}}
+\end{equation}
+\begin{itemize}
+    \item $H_x$: Die Standard-Mess-Jacobi-Matrix (wie im EKF, z.~B. das Lochkameramodell).
+    \item $X_{\delta x}$: Die Zusammensetzungs-Jacobi-Matrix (Jacobian of Composition). Sie bildet den minimalen Fehlerraum (z.~B. 3D-Vektor) auf den vollen Zustandsraum (z.~B. 4D-Quaternion) ab.
+\end{itemize}
+
+Mit $H_{\delta x}$ erfolgt das Standard-Update:
+\begin{align}
+    S_k &= H_{\delta x} P_{k|k-1} H_{\delta x}^T + R \\
+    K_k &= P_{k|k-1} H_{\delta x}^T S_k^{-1}
+\end{align}
+
+Der Filter schätzt nun den aktuellen Fehlerzustand und aktualisiert die Kovarianz:
+\begin{align}
+    \delta x_{k|k} &= K_k \tilde{y}_k \\
+    P_{k|k} &= (I - K_k H_{\delta x}) P_{k|k-1}
+\end{align}
+
+\subsection{Injektion und Reset}
+Abschließend wird der geschätzte Fehler in den Nominalzustand injiziert, um diesen zu korrigieren. Da der Fehler nun Teil des Nominalzustands ist, wird der Fehlerzustand für den nächsten rekursiven Schritt zurückgesetzt (Reset):
+
+\begin{align}
+    x &\leftarrow x \oplus \delta x_{k|k} \\
+    \delta x_{k|k} &\leftarrow 0
+\end{align}
+Dieser Reset-Mechanismus sorgt dafür, dass der Fehlerzustand stets nahe Null bleibt, wodurch die Linearisierungsfehler des EKF minimiert werden.
+
+\subsection{ESKF Beispiel: 3D-Orientierungstracking (Attitude Estimation)}
+\label{sec:eskf_example}
+
+Um den ESKF zu veranschaulichen, betrachten wir das reine Tracking der 3D-Kameraorientierung. Der Nominalzustand ist das Quaternion $q$, der Fehlerzustand der 3D-Rotationsvektor $\delta \theta$. Die Eingabe $u$ ist die Winkelgeschwindigkeit $\omega$ eines Gyroskops. Die Messung $z$ ist die Beobachtung eines bekannten 3D-Weltpunktes $p_w$ im Kamerabild.
+
+\subsubsection{1. Prädiktion (Nominal- und Fehlerzustand)}
+Die physikalische Prädiktion des Nominalquaternions $q$ erfolgt durch Integration der Winkelgeschwindigkeit $\omega_k$ über das Zeitintervall $\Delta t$:
+\begin{equation}
+    q_{k|k-1} = q_{k-1|k-1} \otimes \exp\left(\frac{1}{2} \omega_k \Delta t\right)
+\end{equation}
+Wobei $\otimes$ die Quaternionen-Multiplikation und $\exp()$ die Abbildung eines Rotationsvektors auf ein Quaternion darstellt.
+
+Die Prädiktion des Fehlerzustands bleibt $\delta \theta_{k|k-1} = 0$. Die zugehörige $3 \times 3$ Kovarianzmatrix $P$ wächst abhängig von der Fehlerkinematik $F_{\delta x}$ und dem Gyroskop-Rauschen $Q$:
+\begin{equation}
+    P_{k|k-1} = \underbrace{\left(I_{3\times3} - [\omega_k \times] \Delta t\right)}_{F_{\delta x}} P_{k-1|k-1} F_{\delta x}^T + Q \Delta t^2
+\end{equation}
+Hierbei ist $[\omega_k \times]$ die schiefsymmetrische Matrix des Vektors $\omega_k$.
+
+\subsubsection{2. Korrektur (Update)}
+Zur Berechnung des Residuums projiziert das Nominalquaternion $q_{k|k-1}$ den Weltpunkt in das Kamera-Koordinatensystem, was den erwarteten Punkt $\hat{p}_c$ ergibt:
+\begin{equation}
+    \tilde{y}_k = z_k - \hat{p}_c
+\end{equation}
+
+Die ESKF-Mess-Jacobi-Matrix $H_{\delta x}$ wird nicht nach dem 4D-Quaternion abgeleitet, sondern direkt nach dem 3D-Fehlervektor $\delta \theta$. Die analytische Ableitung der Rotation eines Punktes nach dem Rotationsfehler entspricht dem negativen Kreuzprodukt des erwarteten Punktes:
+\begin{equation}
+    H_{\delta x} = [\hat{p}_c \times] = \begin{bmatrix} 0 & -\hat{p}_{c,z} & \hat{p}_{c,y} \\ \hat{p}_{c,z} & 0 & -\hat{p}_{c,x} \\ -\hat{p}_{c,y} & \hat{p}_{c,x} & 0 \end{bmatrix}
+\end{equation}
+
+Mit dieser kompakten $3 \times 3$ Matrix $H_{\delta x}$ wird der Standard-Update-Schritt ausgeführt, um den Fehlerzustand $\delta \theta_{k|k}$ zu schätzen:
+\begin{align}
+    S_k &= H_{\delta x} P_{k|k-1} H_{\delta x}^T + R \\
+    K_k &= P_{k|k-1} H_{\delta x}^T S_k^{-1} \\
+    \delta \theta_{k|k} &= K_k \tilde{y}_k \\
+    P_{k|k} &= (I_{3\times3} - K_k H_{\delta x}) P_{k|k-1}
+\end{align}
+
+\subsubsection{3. Injektion und Reset}
+Der berechnete 3D-Korrekturwinkel $\delta \theta_{k|k}$ wird als Fehler-Quaternion formuliert und auf den Nominalzustand aufmultipliziert (Injiziert):
+\begin{equation}
+    q_{k|k} = q_{k|k-1} \otimes \exp\left(\frac{1}{2} \delta \theta_{k|k}\right)
+\end{equation}
+Anschließend wird der Fehlerzustand für den nächsten Zyklus zurückgesetzt: $\delta \theta \leftarrow 0$.
+
+
+\section{Ausreißererkennung (Outlier Rejection) mittels Mahalanobis-Distanz}
+\label{sec:outlier_rejection}
+
+In IBVS-Anwendungen sind Feature-Matcher (wie \textit{xfeat}) anfällig für falsche Assoziationen (False Positives) durch Hintergrundclutter, Reflexionen oder temporäre Verdeckungen. Die unbedarfte Integration solcher Ausreißer in den Update-Schritt des Kalman-Filters führt zur Divergenz der Zustandsschätzung und folglich zur Instabilität des Reglers.
+
+Um dies zu verhindern, wird ein Gating-Verfahren angewendet, das Messungen vor dem Update-Schritt auf statistische Plausibilität prüft.
+
+\subsection{Die Mahalanobis-Distanz}
+Anstelle der unskalierten euklidischen Distanz im Bildraum wird die Mahalanobis-Distanz verwendet. Sie gewichtet das Residuum $\tilde{y}_k$ (die Differenz zwischen Messung und Prädiktion) mit der Innovationskovarianz $S_k$. Die Matrix $S_k$ repräsentiert die kombinierte Unsicherheit aus Systemmodell und Messrauschen.
+
+Die quadrierte Mahalanobis-Distanz $D^2$ berechnet sich als:
+\begin{equation}
+    D^2 = \tilde{y}_k^T S_k^{-1} \tilde{y}_k
+\end{equation}
+
+\subsection{Gating mittels Chi-Quadrat-Test ($\chi^2$)}
+Unter der Annahme von normalverteiltem Rauschen folgt die Variable $D^2$ einer $\chi^2$-Verteilung mit $m$ Freiheitsgraden (Degrees of Freedom, DoF), wobei $m$ der Dimension der Messung entspricht. Für 2D-Feature-Tracking im Bildraum gilt $m = 2$.
+
+Um eine Messung zu validieren, wird ein Konfidenzintervall (typischerweise $95\,\%$) gewählt. Der entsprechende Schwellenwert $\gamma$ wird aus der $\chi^2$-Verteilungstabelle entnommen (für $m=2, p=0.95$ ist $\gamma \approx 5.991$).
+
+Die Gating-Bedingung lautet:
+\begin{equation}
+    \begin{cases} 
+      D^2 \leq \gamma & \text{Messung validiert (Update durchführen)} \\
+      D^2 > \gamma & \text{Ausreißer (Update überspringen)} 
+   \end{cases}
+\end{equation}
+
+Wird eine Messung als Ausreißer klassifiziert, wird der Update-Schritt vollständig übersprungen. Der Filter geht in einen reinen Prädiktionsmodus über, bei dem die a-priori-Schätzungen als a-posteriori-Werte für den aktuellen Zeitschritt übernommen werden:
+\begin{align}
+    x_{k|k} &= x_{k|k-1} \\
+    P_{k|k} &= P_{k|k-1}
+\end{align}
+Dies ermöglicht es dem System, kurzzeitige Fehler oder Verdeckungen (Occlusions) des Keypoints robust zu überbrücken.
+
+\end{document}
