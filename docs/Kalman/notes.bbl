@@ -1,0 +1,366 @@
+% $ biblatex auxiliary file $
+% $ biblatex bbl format version 3.3 $
+% Do not modify the above lines!
+%
+% This is an auxiliary file used by the 'biblatex' package.
+% This file may safely be deleted. It will be recreated by
+% biber as required.
+%
+\begingroup
+\makeatletter
+\@ifundefined{ver@biblatex.sty}
+  {\@latex@error
+     {Missing 'biblatex' package}
+     {The bibliography requires the 'biblatex' package.}
+      \aftergroup\endinput}
+  {}
+\endgroup
+
+
+\refsection{0}
+  \datalist[entry]{none/global//global/global/global}
+    \entry{kalman1960new}{article}{}{}
+      \name{author}{1}{}{%
+        {{hash=45f5df5515dbc3f650fa4dd7ab4fc93e}{%
+           family={Kalman},
+           familyi={K\bibinitperiod},
+           given={Rudolph\bibnamedelima Emil},
+           giveni={R\bibinitperiod\bibinitdelim E\bibinitperiod}}}%
+      }
+      \list{publisher}{1}{%
+        {American Society of Mechanical Engineers}%
+      }
+      \strng{namehash}{45f5df5515dbc3f650fa4dd7ab4fc93e}
+      \strng{fullhash}{45f5df5515dbc3f650fa4dd7ab4fc93e}
+      \strng{fullhashraw}{45f5df5515dbc3f650fa4dd7ab4fc93e}
+      \strng{bibnamehash}{45f5df5515dbc3f650fa4dd7ab4fc93e}
+      \strng{authorbibnamehash}{45f5df5515dbc3f650fa4dd7ab4fc93e}
+      \strng{authornamehash}{45f5df5515dbc3f650fa4dd7ab4fc93e}
+      \strng{authorfullhash}{45f5df5515dbc3f650fa4dd7ab4fc93e}
+      \strng{authorfullhashraw}{45f5df5515dbc3f650fa4dd7ab4fc93e}
+      \field{sortinit}{1}
+      \field{sortinithash}{4f6aaa89bab872aa0999fec09ff8e98a}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{journaltitle}{Journal of Basic Engineering}
+      \field{number}{1}
+      \field{title}{A new approach to linear filtering and prediction problems}
+      \field{volume}{82}
+      \field{year}{1960}
+      \field{pages}{35\bibrangedash 45}
+      \range{pages}{11}
+    \endentry
+    \entry{welch2006introduction}{report}{}{}
+      \name{author}{2}{}{%
+        {{hash=19eb8ef0f1cf49ad4375a0a4acc3a385}{%
+           family={Welch},
+           familyi={W\bibinitperiod},
+           given={Greg},
+           giveni={G\bibinitperiod}}}%
+        {{hash=e4f38e96180c309ad00c07afe4fbac50}{%
+           family={Bishop},
+           familyi={B\bibinitperiod},
+           given={Gary},
+           giveni={G\bibinitperiod}}}%
+      }
+      \list{institution}{1}{%
+        {University of North Carolina at Chapel Hill}%
+      }
+      \list{location}{1}{%
+        {Chapel Hill, NC, USA}%
+      }
+      \strng{namehash}{124b6b88ade76463f9b17a4f14042fca}
+      \strng{fullhash}{124b6b88ade76463f9b17a4f14042fca}
+      \strng{fullhashraw}{124b6b88ade76463f9b17a4f14042fca}
+      \strng{bibnamehash}{124b6b88ade76463f9b17a4f14042fca}
+      \strng{authorbibnamehash}{124b6b88ade76463f9b17a4f14042fca}
+      \strng{authornamehash}{124b6b88ade76463f9b17a4f14042fca}
+      \strng{authorfullhash}{124b6b88ade76463f9b17a4f14042fca}
+      \strng{authorfullhashraw}{124b6b88ade76463f9b17a4f14042fca}
+      \field{sortinit}{2}
+      \field{sortinithash}{8b555b3791beccb63322c22f3320aa9a}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{title}{An Introduction to the Kalman Filter}
+      \field{type}{techreport}
+      \field{year}{2006}
+    \endentry
+    \entry{thrun2005probabilistic}{book}{}{}
+      \name{author}{3}{}{%
+        {{hash=5112ea130eadef0764fce0145b8b9f91}{%
+           family={Thrun},
+           familyi={T\bibinitperiod},
+           given={Sebastian},
+           giveni={S\bibinitperiod}}}%
+        {{hash=98f4ab1bc2ac191d8f8a0651315ce9c0}{%
+           family={Burgard},
+           familyi={B\bibinitperiod},
+           given={Wolfram},
+           giveni={W\bibinitperiod}}}%
+        {{hash=93b0c4a7857a82a8f94e256475887c74}{%
+           family={Fox},
+           familyi={F\bibinitperiod},
+           given={Dieter},
+           giveni={D\bibinitperiod}}}%
+      }
+      \list{location}{1}{%
+        {Cambridge, MA, USA}%
+      }
+      \list{publisher}{1}{%
+        {MIT Press}%
+      }
+      \strng{namehash}{a8138eeb00bc94a8497816e6b86343b3}
+      \strng{fullhash}{cb3e97dbc1e8d4a631a5b656776c23d3}
+      \strng{fullhashraw}{cb3e97dbc1e8d4a631a5b656776c23d3}
+      \strng{bibnamehash}{cb3e97dbc1e8d4a631a5b656776c23d3}
+      \strng{authorbibnamehash}{cb3e97dbc1e8d4a631a5b656776c23d3}
+      \strng{authornamehash}{a8138eeb00bc94a8497816e6b86343b3}
+      \strng{authorfullhash}{cb3e97dbc1e8d4a631a5b656776c23d3}
+      \strng{authorfullhashraw}{cb3e97dbc1e8d4a631a5b656776c23d3}
+      \field{sortinit}{3}
+      \field{sortinithash}{ad6fe7482ffbd7b9f99c9e8b5dccd3d7}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{title}{Probabilistic Robotics}
+      \field{year}{2005}
+    \endentry
+    \entry{julier1997new}{inproceedings}{}{}
+      \name{author}{2}{}{%
+        {{hash=80d83e3d56bc4413658bfad461dc4586}{%
+           family={Julier},
+           familyi={J\bibinitperiod},
+           given={Simon\bibnamedelima J.},
+           giveni={S\bibinitperiod\bibinitdelim J\bibinitperiod}}}%
+        {{hash=5c26b146559462ed5dfeb7fcccc1030b}{%
+           family={Uhlmann},
+           familyi={U\bibinitperiod},
+           given={Jeffrey\bibnamedelima K.},
+           giveni={J\bibinitperiod\bibinitdelim K\bibinitperiod}}}%
+      }
+      \list{organization}{1}{%
+        {SPIE}%
+      }
+      \strng{namehash}{46be1162cd4bd01e4c1abbf265a0be7d}
+      \strng{fullhash}{46be1162cd4bd01e4c1abbf265a0be7d}
+      \strng{fullhashraw}{46be1162cd4bd01e4c1abbf265a0be7d}
+      \strng{bibnamehash}{46be1162cd4bd01e4c1abbf265a0be7d}
+      \strng{authorbibnamehash}{46be1162cd4bd01e4c1abbf265a0be7d}
+      \strng{authornamehash}{46be1162cd4bd01e4c1abbf265a0be7d}
+      \strng{authorfullhash}{46be1162cd4bd01e4c1abbf265a0be7d}
+      \strng{authorfullhashraw}{46be1162cd4bd01e4c1abbf265a0be7d}
+      \field{sortinit}{4}
+      \field{sortinithash}{9381316451d1b9788675a07e972a12a7}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{booktitle}{Signal Processing, Sensor Fusion, and Target Recognition VI}
+      \field{title}{New extension of the Kalman filter to nonlinear systems}
+      \field{volume}{3068}
+      \field{year}{1997}
+      \field{pages}{182\bibrangedash 193}
+      \range{pages}{12}
+    \endentry
+    \entry{forster2017manifold}{article}{}{}
+      \name{author}{4}{}{%
+        {{hash=a6b6e778fcd0ba37d9fef8a433471203}{%
+           family={Forster},
+           familyi={F\bibinitperiod},
+           given={Christian},
+           giveni={C\bibinitperiod}}}%
+        {{hash=09ed5bfe663f495a0cb6828e722b7919}{%
+           family={Carlone},
+           familyi={C\bibinitperiod},
+           given={Luca},
+           giveni={L\bibinitperiod}}}%
+        {{hash=44074d3cb57c174a8b15ccc9a576ac0d}{%
+           family={Dellaert},
+           familyi={D\bibinitperiod},
+           given={Frank},
+           giveni={F\bibinitperiod}}}%
+        {{hash=dac21ab4ede215439fcc6b051be53a11}{%
+           family={Scaramuzza},
+           familyi={S\bibinitperiod},
+           given={Davide},
+           giveni={D\bibinitperiod}}}%
+      }
+      \list{publisher}{1}{%
+        {IEEE}%
+      }
+      \strng{namehash}{c160fa34da31c9b364cb29944b477266}
+      \strng{fullhash}{df880edafe55d50cae3cadb735b5bd7e}
+      \strng{fullhashraw}{df880edafe55d50cae3cadb735b5bd7e}
+      \strng{bibnamehash}{df880edafe55d50cae3cadb735b5bd7e}
+      \strng{authorbibnamehash}{df880edafe55d50cae3cadb735b5bd7e}
+      \strng{authornamehash}{c160fa34da31c9b364cb29944b477266}
+      \strng{authorfullhash}{df880edafe55d50cae3cadb735b5bd7e}
+      \strng{authorfullhashraw}{df880edafe55d50cae3cadb735b5bd7e}
+      \field{sortinit}{5}
+      \field{sortinithash}{20e9b4b0b173788c5dace24730f47d8c}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{journaltitle}{IEEE Transactions on Robotics}
+      \field{number}{1}
+      \field{title}{On-Manifold Preintegration for Real-Time Visual--Inertial Odometry}
+      \field{volume}{33}
+      \field{year}{2017}
+      \field{pages}{1\bibrangedash 21}
+      \range{pages}{21}
+    \endentry
+    \entry{sola2017quaternion}{article}{}{}
+      \name{author}{1}{}{%
+        {{hash=e082ff94720eff98805e9e08ca921bcc}{%
+           family={Solà},
+           familyi={S\bibinitperiod},
+           given={Joan},
+           giveni={J\bibinitperiod}}}%
+      }
+      \strng{namehash}{e082ff94720eff98805e9e08ca921bcc}
+      \strng{fullhash}{e082ff94720eff98805e9e08ca921bcc}
+      \strng{fullhashraw}{e082ff94720eff98805e9e08ca921bcc}
+      \strng{bibnamehash}{e082ff94720eff98805e9e08ca921bcc}
+      \strng{authorbibnamehash}{e082ff94720eff98805e9e08ca921bcc}
+      \strng{authornamehash}{e082ff94720eff98805e9e08ca921bcc}
+      \strng{authorfullhash}{e082ff94720eff98805e9e08ca921bcc}
+      \strng{authorfullhashraw}{e082ff94720eff98805e9e08ca921bcc}
+      \field{sortinit}{6}
+      \field{sortinithash}{b33bc299efb3c36abec520a4c896a66d}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{journaltitle}{arXiv preprint arXiv:1711.02508}
+      \field{title}{Quaternion kinematics for the error-state Kalman filter}
+      \field{year}{2017}
+    \endentry
+    \entry{kuipers1999quaternions}{book}{}{}
+      \name{author}{1}{}{%
+        {{hash=6f6cb9d14f282595edbde9b8a9b025e2}{%
+           family={Kuipers},
+           familyi={K\bibinitperiod},
+           given={Jack\bibnamedelima B.},
+           giveni={J\bibinitperiod\bibinitdelim B\bibinitperiod}}}%
+      }
+      \list{location}{1}{%
+        {Princeton, NJ, USA}%
+      }
+      \list{publisher}{1}{%
+        {Princeton University Press}%
+      }
+      \strng{namehash}{6f6cb9d14f282595edbde9b8a9b025e2}
+      \strng{fullhash}{6f6cb9d14f282595edbde9b8a9b025e2}
+      \strng{fullhashraw}{6f6cb9d14f282595edbde9b8a9b025e2}
+      \strng{bibnamehash}{6f6cb9d14f282595edbde9b8a9b025e2}
+      \strng{authorbibnamehash}{6f6cb9d14f282595edbde9b8a9b025e2}
+      \strng{authornamehash}{6f6cb9d14f282595edbde9b8a9b025e2}
+      \strng{authorfullhash}{6f6cb9d14f282595edbde9b8a9b025e2}
+      \strng{authorfullhashraw}{6f6cb9d14f282595edbde9b8a9b025e2}
+      \field{sortinit}{7}
+      \field{sortinithash}{108d0be1b1bee9773a1173443802c0a3}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{title}{Quaternions and Rotation Sequences: A Primer with Applications to Orbits, Aerospace, and Virtual Reality}
+      \field{year}{1999}
+    \endentry
+    \entry{corke2017robotics}{book}{}{}
+      \name{author}{1}{}{%
+        {{hash=c0e503339314930d140b67b5e7c55c3e}{%
+           family={Corke},
+           familyi={C\bibinitperiod},
+           given={Peter},
+           giveni={P\bibinitperiod}}}%
+      }
+      \list{publisher}{1}{%
+        {Springer}%
+      }
+      \strng{namehash}{c0e503339314930d140b67b5e7c55c3e}
+      \strng{fullhash}{c0e503339314930d140b67b5e7c55c3e}
+      \strng{fullhashraw}{c0e503339314930d140b67b5e7c55c3e}
+      \strng{bibnamehash}{c0e503339314930d140b67b5e7c55c3e}
+      \strng{authorbibnamehash}{c0e503339314930d140b67b5e7c55c3e}
+      \strng{authornamehash}{c0e503339314930d140b67b5e7c55c3e}
+      \strng{authorfullhash}{c0e503339314930d140b67b5e7c55c3e}
+      \strng{authorfullhashraw}{c0e503339314930d140b67b5e7c55c3e}
+      \field{sortinit}{8}
+      \field{sortinithash}{a231b008ebf0ecbe0b4d96dcc159445f}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{edition}{2nd}
+      \field{series}{Springer Tracts in Advanced Robotics}
+      \field{title}{Robotics, Vision and Control: Fundamental Algorithms in MATLAB}
+      \field{volume}{118}
+      \field{year}{2017}
+    \endentry
+    \entry{chaumette2006visual}{article}{}{}
+      \name{author}{2}{}{%
+        {{hash=c411c5fc2e856c5798beac39ee2fcb79}{%
+           family={Chaumette},
+           familyi={C\bibinitperiod},
+           given={François},
+           giveni={F\bibinitperiod}}}%
+        {{hash=8346db44e6189448a4dff197f5bc47bb}{%
+           family={Hutchinson},
+           familyi={H\bibinitperiod},
+           given={Seth},
+           giveni={S\bibinitperiod}}}%
+      }
+      \list{publisher}{1}{%
+        {IEEE}%
+      }
+      \strng{namehash}{d3ede61a6b2f10dd842afe97603173d6}
+      \strng{fullhash}{d3ede61a6b2f10dd842afe97603173d6}
+      \strng{fullhashraw}{d3ede61a6b2f10dd842afe97603173d6}
+      \strng{bibnamehash}{d3ede61a6b2f10dd842afe97603173d6}
+      \strng{authorbibnamehash}{d3ede61a6b2f10dd842afe97603173d6}
+      \strng{authornamehash}{d3ede61a6b2f10dd842afe97603173d6}
+      \strng{authorfullhash}{d3ede61a6b2f10dd842afe97603173d6}
+      \strng{authorfullhashraw}{d3ede61a6b2f10dd842afe97603173d6}
+      \field{sortinit}{9}
+      \field{sortinithash}{0a5ebc79d83c96b6579069544c73c7d4}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{journaltitle}{IEEE Robotics \& Automation Magazine}
+      \field{number}{4}
+      \field{title}{Visual servo control. I. Basic approaches}
+      \field{volume}{13}
+      \field{year}{2006}
+      \field{pages}{82\bibrangedash 90}
+      \range{pages}{9}
+    \endentry
+    \entry{casiez20121euro}{inproceedings}{}{}
+      \name{author}{3}{}{%
+        {{hash=d2ff2ba74f6c07a922619e059998841d}{%
+           family={Casiez},
+           familyi={C\bibinitperiod},
+           given={G.},
+           giveni={G\bibinitperiod}}}%
+        {{hash=f3682ab96d788ee14b96b4bbcd02424e}{%
+           family={Roussel},
+           familyi={R\bibinitperiod},
+           given={N.},
+           giveni={N\bibinitperiod}}}%
+        {{hash=63ea84dfdfed963b8f3c1900fd916d50}{%
+           family={Vogel},
+           familyi={V\bibinitperiod},
+           given={D.},
+           giveni={D\bibinitperiod}}}%
+      }
+      \list{publisher}{1}{%
+        {ACM}%
+      }
+      \strng{namehash}{a9ca043181100132af00d2f14d409a0e}
+      \strng{fullhash}{33f0be956f8b53397f91209e524fe5d3}
+      \strng{fullhashraw}{33f0be956f8b53397f91209e524fe5d3}
+      \strng{bibnamehash}{33f0be956f8b53397f91209e524fe5d3}
+      \strng{authorbibnamehash}{33f0be956f8b53397f91209e524fe5d3}
+      \strng{authornamehash}{a9ca043181100132af00d2f14d409a0e}
+      \strng{authorfullhash}{33f0be956f8b53397f91209e524fe5d3}
+      \strng{authorfullhashraw}{33f0be956f8b53397f91209e524fe5d3}
+      \field{sortinit}{1}
+      \field{sortinithash}{4f6aaa89bab872aa0999fec09ff8e98a}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{booktitle}{Proceedings of the SIGCHI Conference on Human Factors in Computing Systems}
+      \field{title}{{1\euro{} filter: a simple speed-based low-pass filter for noisy input in interactive systems}}
+      \field{year}{2012}
+    \endentry
+  \enddatalist
+\endrefsection
+\endinput
+

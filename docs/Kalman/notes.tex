@@ -4,6 +4,12 @@
 \usepackage{amsmath}
 \usepackage{amsfonts}
 \usepackage{amssymb}
+\usepackage{csquotes}
+\usepackage{eurosym}
+
+% --- Neues Setup für biblatex ---
+\usepackage[backend=biber, style=ieee]{biblatex}
+\addbibresource{bib.bib} % WICHTIG: Hier MIT der Endung .bib!
 
 \begin{document}
 
@@ -16,7 +22,7 @@ Der Standard Kalman-Filter (KF) ist ein optimaler rekursiver Schätzer für line
     \mathbf{x}_k = \begin{bmatrix} u_k \\ v_k \\ \dot{u}_k \\ \dot{v}_k \end{bmatrix}
 \end{equation}
 
-Der Filter arbeitet nun in zwei rekursiven Schritten: Prädiktion (\textit{a priori} Schätzung) und Korrektur (\textit{a posteriori} Schätzung). Wir verwenden die Notation $\mathbf{x}_{k|k-1}$, was bedeutet: „Der geschätzte Zustand zum Zeitpunkt $k$, basierend auf dem Wissen bis zum Zeitpunkt $k-1$„.
+Der Filter arbeitet nun in zwei rekursiven Schritten: Prädiktion (\textit{a priori} Schätzung) und Korrektur (\textit{a posteriori} Schätzung). Wir verwenden die Notation $\mathbf{x}_{k|k-1}$, was bedeutet: \enquote{Der geschätzte Zustand zum Zeitpunkt $k$, basierend auf dem Wissen bis zum Zeitpunkt $k-1$}.
 
 \subsection{Prädiktion (Predict)}
 In diesem Schritt wird der Zustand basierend auf dem Systemmodell in die Zukunft projiziert. Die Matrix $F$ beschreibt die lineare Kinematik (bei konstanter Geschwindigkeit gilt $u_k=u_{k-1}+\dot{u}_{k-1}\Delta t$). $Q$ ist die Prozessrauschkovarianz (Modellunsicherheit).
@@ -325,5 +331,124 @@ Wird eine Messung als Ausreißer klassifiziert, wird der Update-Schritt vollstä
     P_{k|k} &= P_{k|k-1}
 \end{align}
 Dies ermöglicht es dem System, kurzzeitige Fehler oder Verdeckungen (Occlusions) des Keypoints robust zu überbrücken.
+
+
+\section{Praktisches Filter-Tuning: Bestimmung von $Q$ und $R$}
+\label{sec:tuning}
+
+Die Leistungsfähigkeit des Kalman-Filters hängt maßgeblich von der korrekten Parametrisierung der Prozessrauschkovarianz $Q$ und der Messrauschkovarianz $R$ ab. Diese Matrizen steuern die Gewichtung (Kalman-Gain) zwischen dem physikalischen Prädiktionsmodell und den tatsächlichen Sensormessungen.
+
+\subsection{Messrauschen $R$ (Sensormodell)}
+Die Matrix $R$ beschreibt die Unsicherheit der Beobachtung. In einem IBVS-System mit Keypoint-Tracking repräsentiert sie den Pixel-Jitter des Matchers (z.~B. \textit{xfeat}). Sie lässt sich empirisch ermitteln, indem die Varianz $\sigma^2$ der Pixelkoordinaten $(u,v)$ eines statischen Ziels über mehrere Frames gemessen wird. Unter der Annahme von unkorreliertem Rauschen in u- und v-Richtung ergibt sich eine Diagonalmatrix:
+\begin{equation}
+    R = \begin{bmatrix} \sigma_u^2 & 0 \\ 0 & \sigma_v^2 \end{bmatrix}
+\end{equation}
+Ein großes $R$ führt zu starker Glättung (der Filter vertraut der Messung wenig), erhöht jedoch die Latenz (Lag).
+
+\subsection{Prozessrauschen $Q$ (Systemmodell)}
+Die Matrix $Q$ modelliert die Unsicherheit des Systemmodells, also Effekte, die analytisch nicht erfasst wurden. Bei Verwendung eines Constant-Velocity (CV) Modells repräsentiert $Q$ die unmodellierten Beschleunigungen des Objekts.
+Die Bestimmung von $Q$ ist in der Praxis oft heuristisch. Ein zu klein gewähltes $Q$ führt zu einem trägen Filter, der echten Richtungswechseln des Objekts nicht schnell genug folgt (Filter-Lag oder Divergenz). Ein zu großes $Q$ degradiert den Kalman-Filter zu einem reinen Beobachter, der das Messrauschen ungedämpft an den Regler weitergibt. Das Tuning ist ein Kompromiss (Trade-off) zwischen Glättung (Smoothness) und Reaktionsgeschwindigkeit (Responsiveness).
+
+\section{Der 1\euro{} Filter (One Euro Filter)}
+\label{sec:one_euro_filter}
+
+Für das reine Glätten von 2D-Pixelkoordinaten in IBVS-Anwendungen, bei denen keine komplexe Sensorfusion oder physikalische Systemmodellierung erforderlich ist, stellt der 1\euro{} Filter eine hocheffiziente Alternative zum Kalman-Filter dar. Er adressiert direkt den Trade-off zwischen Jitter (Zittern im Stillstand) und Lag (Latenz bei Bewegung).
+
+\subsection{Prinzip der adaptiven exponentiellen Glättung}
+Der 1\euro{} Filter ist ein Tiefpassfilter erster Ordnung (exponentielle Glättung), dessen Glättungsfaktor $\alpha$ nicht konstant ist, sondern dynamisch an die Änderungsrate (Geschwindigkeit) des Signals angepasst wird. Die Grundgleichung lautet:
+\begin{equation}
+    \hat{x}_i = \alpha x_i + (1 - \alpha) \hat{x}_{i-1}
+\end{equation}
+Dabei ist $x_i$ die verrauschte Eingabe zum Zeitschritt $i$ und $\hat{x}_i$ der gefilterte Wert. Der Faktor $\alpha \in (0, 1]$ ergibt sich aus der Sampling-Periode $T_e$ und einer dynamischen Grenzfrequenz $f_c$:
+\begin{equation}
+    \alpha(f_c, T_e) = \frac{T_e}{T_e + \frac{1}{2 \pi f_c}}
+\end{equation}
+
+\subsection{Exkurs: Frequenzbereich und Grenzfrequenz ($f_c$)}
+\label{sec:cutoff_frequency}
+
+In der Signalverarbeitung unterscheidet man bei zeitdiskreten Messsignalen (wie Pixelkoordinaten aus \textit{xfeat}) zwischen niederfrequenten Signalanteilen (langsame, bewusste Bewegungen des Objekts) und hochfrequenten Signalanteilen (schnelles Messrauschen oder Jitter).
+
+Ein Tiefpassfilter dämpft Frequenzen, die oberhalb einer bestimmten Schwelle liegen, und lässt Frequenzen unterhalb dieser Schwelle passieren. Diese Schwelle wird als \textbf{Grenzfrequenz} $f_c$ (Cutoff Frequency) bezeichnet (üblicherweise definiert als der $-3\,\text{dB}$-Punkt im Amplitudengang).
+
+Im Kontext des Objekt-Trackings bestimmt $f_c$ den fundamentalen Trade-off des Filters:
+\begin{itemize}
+    \item \textbf{Niedriges $f_c$:} Starke Dämpfung von hochfrequentem Rauschen (eliminiert Jitter), führt jedoch zu einer starken Phasenverschiebung bzw. Signalverzögerung (Lag) bei plötzlichen Bewegungen.
+    \item \textbf{Hohes $f_c$:} Geringe Phasenverschiebung (minimiert Lag), lässt jedoch hochfrequentes Sensorrauschen ungefiltert in das Regelsystem durch.
+\end{itemize}
+
+Der 1\euro{} Filter löst diesen Konflikt, indem er $f_c$ nicht als Konstante definiert, sondern sie dynamisch in Abhängigkeit der aktuellen Signaländerungsrate moduliert.
+
+\subsection{Dynamische Grenzfrequenz}
+Die Kerninnovation des Filters besteht darin, die Grenzfrequenz $f_c$ als lineare Funktion der gefilterten Änderungsrate $|\hat{\dot{x}}_i|$ zu definieren:
+\begin{equation}
+    f_c = f_{min} + \beta |\hat{\dot{x}}_i|
+\end{equation}
+\begin{itemize}
+    \item $f_{min}$ ($>0$): Minimale Grenzfrequenz. Dominiert bei niedrigen Geschwindigkeiten und wird minimiert, um Jitter im Stillstand zu eliminieren.
+    \item $\beta$ ($>0$): Geschwindigkeits-Koeffizient. Erhöht die Grenzfrequenz bei schnellen Bewegungen, um Lag (Latenz) zu reduzieren.
+\end{itemize}
+
+Die Änderungsrate (Geschwindigkeit) wird zur Rauschunterdrückung intern ebenfalls durch einen Tiefpassfilter mit konstanter Grenzfrequenz $f_{c_d}$ geglättet:
+\begin{equation}
+    \dot{x}_i = \frac{x_i - \hat{x}_{i-1}}{T_e}
+\end{equation}
+\begin{equation}
+    \hat{\dot{x}}_i = \alpha(f_{c_d}, T_e) \dot{x}_i + (1 - \alpha(f_{c_d}, T_e)) \hat{\dot{x}}_{i-1}
+\end{equation}
+
+\textbf{Fazit für IBVS:} Der 1\euro{} Filter benötigt pro Signal (z.~B. u- und v-Koordinate separat) nur zwei Tuning-Parameter ($f_{min}$ und $\beta$), bewahrt eine $O(1)$-Komplexität in Laufzeit und Speicher und ist extrem robust gegen verrauschte Keypoint-Matcher.
+
+\section{Praktisches Tuning des 1\euro{} Filters}
+\label{sec:one_euro_tuning}
+
+Ein wesentlicher Vorteil des 1\euro{} Filters gegenüber stochastischen Schätzern (wie dem Kalman-Filter) ist sein entkoppeltes und intuitives Tuning-Verfahren. Die Parameter $f_{min}$ (minimale Grenzfrequenz) und $\beta$ (Geschwindigkeits-Koeffizient) können systematisch in zwei unabhängigen Schritten am realen System appliziert werden, wie von den Autoren \cite{casiez20121c} vorgeschlagen.
+
+\subsection{Schritt 1: Minimierung des Jitters (Statische Phase)}
+Ziel des ersten Schrittes ist die Eliminierung des hochfrequenten Messrauschens (Jitter) im Stillstand.
+\begin{enumerate}
+    \item Der Geschwindigkeits-Koeffizient wird initial auf $\beta = 0$ gesetzt. Dadurch wird die adaptive Komponente deaktiviert und der Filter verhält sich wie ein reiner Tiefpassfilter erster Ordnung mit der festen Grenzfrequenz $f_{min}$.
+    \item Das zu trackende Objekt (bzw. die Kamera) wird in Ruhe gehalten.
+    \item Der Parameter $f_{min}$ wird ausgehend von einem Startwert (z.~B. $1.0\,\text{Hz}$) iterativ verringert, bis der sichtbare Jitter im Ausgangssignal $\hat{x}_i$ ein für das IBVS-System tolerierbares Minimum erreicht hat. Typische Werte liegen im Bereich von $0.01\,\text{Hz}$ bis $1.0\,\text{Hz}$.
+\end{enumerate}
+
+\subsection{Schritt 2: Minimierung des Lags (Dynamische Phase)}
+Durch den niedrigen Wert von $f_{min}$ weist der Filter nun eine starke Phasenverschiebung (Lag) bei Signaländerungen auf. Ziel des zweiten Schrittes ist es, diese Latenz bei Bewegung zu eliminieren.
+\begin{enumerate}
+    \item Der Parameter $f_{min}$ wird auf dem in Schritt 1 ermittelten Wert belassen.
+    \item Das Objekt wird nun mit der maximal zu erwartenden Systemdynamik bewegt (schnelle, abrupte Translationen im Bildraum).
+    \item Der Parameter $\beta$ wird ausgehend von $0$ iterativ in kleinen Schritten (z.~B. in Zehnerpotenzen: $0.001, 0.01, 0.1$) erhöht. Dadurch steigt die dynamische Grenzfrequenz $f_c$ bei hohen Geschwindigkeiten an.
+    \item $\beta$ wird so lange erhöht, bis der beobachtete Lag minimiert ist und der Filter den schnellen Bewegungen ohne merkliche Verzögerung folgen kann.
+\end{enumerate}
+Die Grenzfrequenz für die Geschwindigkeitsfilterung ($f_{c_d}$) wird in der Regel konstant auf $1.0\,\text{Hz}$ belassen, da sich dieser Wert empirisch für die meisten kinematisches Tracking-Aufgaben als robust erwiesen hat.
+
+\section{Literatur}
+\begin{itemize}
+    \item KF und EKF: \begin{itemize}
+        \item Das Original-Paper von Kalman, in dem der Filter erstmals vorgestellt wurde \cite{kalman1960new}.
+        \item Das beste Tutorial für den Einstieg, Pflichtlektüre \cite{welch2006introduction}.
+        \item Das absolute Standardwerk als Buch. Kapitel 3 behandelt KF, EKF und UKF extrem detailliert \cite{thrun2005probabilistic}.
+    \end{itemize}
+    \item UKF: \begin{itemize}
+        \item Das Original-Paper zur Unscented Transform \cite{julier1997new}.
+    \end{itemize}
+    \item ESKF: \begin{itemize}
+        \item Das Standardwerk für den ESKF, insbesondere im Kontext von IMU-gestützter Navigation \cite{forster2017manifold}.
+        \item Dies ist das wichtigste Paper für dich, wenn du den ESKF mit Quaternionen implementieren willst. Es erklärt die Kettenregel und Matrizen Schritt für Schritt \cite{sola2017quaternion}.
+    \end{itemize}
+    \item Quaternionen und 3D-Rotationen: \begin{itemize}
+        \item Das Standardwerk für Quaternionen, insbesondere die Kapitel über Kinematik und Fehlerzustände \cite{kuipers1999quaternions}.
+        \item Kapitel über Kalman-Filter und 3D-Rotationen, mit vielen praktischen Beispielen \cite{corke2017robotics}.
+    \end{itemize}
+    \item IBVS: \begin{itemize}
+        \item Das Standardwerk für IBVS, um den Gesamtkontext deines Projekts wissenschaftlich zu belegen \cite{chaumette2006visual}.
+    \end{itemize}
+    \item 1\euro{} Filter: \begin{itemize}
+        \item Das Original-Paper, das die Idee des adaptiven Tiefpassfilters vorstellt \cite{casiez20121euro}.
+    \end{itemize}
+\end{itemize}
+
+% --- Literaturverzeichnis ausgeben ---
+\printbibliography
 
 \end{document}
