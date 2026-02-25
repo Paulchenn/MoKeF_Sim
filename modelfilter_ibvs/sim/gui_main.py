@@ -26,9 +26,7 @@ import matplotlib.pyplot as plt
 try:
     from modelfilter_ibvs.sim.robot_sim import RobotSimulator
     from modelfilter_ibvs.core.ibvs import IBVSController
-    from modelfilter_ibvs.core.filter_EKF import HomographyEKF
-    # from modelfilter_ibvs.core.feature_extractor import FeatureExtractor
-    from modelfilter_ibvs.core.feature_extractor import AVAILABLE_EXTRACTORS
+    from modelfilter_ibvs.core.detectors.factory import ExtractorFactory
     from modelfilter_ibvs.core.filter import AVAILABLE_FILTERS
 except ImportError:
     path_file = os.path.abspath(__file__)
@@ -38,9 +36,7 @@ except ImportError:
     sys.path.insert(0, path_grandpaent)
     from sim.robot_sim import RobotSimulator
     from core.ibvs import IBVSController
-    from modelfilter_ibvs.core.filter_EKF import HomographyEKF
-    # from core.feature_extractor import FeatureExtractor
-    from core.feature_extractor import AVAILABLE_EXTRACTORS
+    from core.detectors.factory import ExtractorFactory
     from core.filter import AVAILABLE_FILTERS
 
 class SimulatorGUI(QMainWindow):
@@ -133,7 +129,7 @@ class SimulatorGUI(QMainWindow):
         vision_layout = QVBoxLayout()
 
         self.cb_extractor = QComboBox()
-        self.cb_extractor.addItems(list(AVAILABLE_EXTRACTORS.keys()))
+        self.cb_extractor.addItems(ExtractorFactory.get_available_extractors())
         self.cb_extractor.currentTextChanged.connect(self.change_extractor)
 
         vision_layout.addWidget(QLabel("Feature Extractor:"))
@@ -278,15 +274,15 @@ class SimulatorGUI(QMainWindow):
             s.blockSignals(False)
 
     def change_extractor(self, extractor_name):
-        """Wird aufgerufen, wenn ein anderer Extractor im Dropdown gewählt wird."""
         print(f"Wechsle Feature Extractor zu: {extractor_name}")
-
-        # Instanziiere die gewählte Klasse aus dem Dictionary
-        ExtractorClass = AVAILABLE_EXTRACTORS[extractor_name]
-        self.vision = ExtractorClass()
-
-        # Da der neue Extractor keine Soll-Bilder kennt, machen wir einen Reset
-        # (Um den Aufruf sauber zu halten, checken wir, ob wir schon initialisiert sind)
+        
+        # NEU: Instanziierung über die Factory
+        try:
+            self.vision = ExtractorFactory.create(extractor_name)
+        except Exception as e:
+            print(f"Fehler beim Laden von {extractor_name}: {e}")
+            return
+            
         if hasattr(self, 'is_servoing'):
             self.reset_simulation()
 
