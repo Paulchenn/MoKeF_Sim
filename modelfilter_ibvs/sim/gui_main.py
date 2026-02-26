@@ -27,7 +27,7 @@ try:
     from modelfilter_ibvs.sim.robot_sim import RobotSimulator
     from modelfilter_ibvs.core.ibvs import IBVSController
     from modelfilter_ibvs.core.detectors.factory import ExtractorFactory
-    from modelfilter_ibvs.core.filter import AVAILABLE_FILTERS
+    from modelfilter_ibvs.core.filters.factory import FilterFactory
 except ImportError:
     path_file = os.path.abspath(__file__)
     path_parent = os.path.dirname(path_file)
@@ -37,7 +37,7 @@ except ImportError:
     from sim.robot_sim import RobotSimulator
     from core.ibvs import IBVSController
     from core.detectors.factory import ExtractorFactory
-    from core.filter import AVAILABLE_FILTERS
+    from core.filters.factory import FilterFactory
 
 class SimulatorGUI(QMainWindow):
     def __init__(self):
@@ -145,7 +145,7 @@ class SimulatorGUI(QMainWindow):
         filter_layout.addWidget(QLabel("Tracking Filter:"))
         
         self.cb_filter_select = QComboBox()
-        self.cb_filter_select.addItems(list(AVAILABLE_FILTERS.keys()))
+        self.cb_filter_select.addItems(FilterFactory.get_available_filters())
         # Setze Standard auf Homography (Index 1)
         self.cb_filter_select.setCurrentIndex(0)
         self.cb_filter_select.currentTextChanged.connect(self.change_filter)
@@ -287,36 +287,22 @@ class SimulatorGUI(QMainWindow):
             self.reset_simulation()
 
     def change_filter(self, filter_name):
-        FilterClass = AVAILABLE_FILTERS[filter_name]
-        if FilterClass is None:
-            self.active_filter = None
-            print("Filter deaktiviert (-)")
-        else:
-            K = self.sim.get_intrinsic_matrix()
-            self.active_filter = FilterClass(K)
-            print(f"Filter gewechselt zu: {filter_name}")
-            
-        if hasattr(self, 'is_servoing'):
-            self.reset_simulation()
-
-    def change_filter(self, filter_name):
-        FilterClass = AVAILABLE_FILTERS[filter_name]
-        
-        # 1. Altes Layout aufräumen
         self.clear_layout(self.filter_params_layout)
         
-        # 2. Filter initialisieren und GUI aufbauen
-        if FilterClass is None:
-            self.active_filter = None
+        try:
+            K = self.sim.get_intrinsic_matrix()
+            self.active_filter = FilterFactory.create(filter_name, K)
+        except Exception as e:
+            print(f"Fehler beim Laden von {filter_name}: {e}")
+            return
+        
+        if self.active_filter is None:
             self.filter_params_group.hide()
             print("Filter deaktiviert (-)")
-            
         else:
-            K = self.sim.get_intrinsic_matrix()
-            self.active_filter = FilterClass(K)
             self.filter_params_group.show()
             
-            # -- SPEZIFISCHE PARAMETER FÜR DEN HOMOGRAPHIE-FILTER --
+            # -- PARAMETER FÜR HOMOGRAPHIE --
             if filter_name == "Homography Model (SL3)":
                 h_layout = QHBoxLayout()
                 h_layout.addWidget(QLabel("Alpha (Meas. Trust):"))
@@ -333,8 +319,8 @@ class SimulatorGUI(QMainWindow):
                 h_layout.addWidget(sb_alpha)
                 self.filter_params_layout.addLayout(h_layout)
                 
-            # -- SPEZIFISCHE PARAMETER FÜR DEN EKF --
-            elif filter_name == "Extended Kalman Filter": # <- Passe den String an dein Dictionary an!
+            # -- PARAMETER FÜR EKF / ESKF / UKF --
+            elif filter_name in ["Standard Kalman Filter", "Extended Kalman Filter", "Error-State Kalman Filter", "Unscented Kalman Filter"]:
                 # Q-Parameter (Prozessrauschen)
                 q_layout = QHBoxLayout()
                 q_layout.addWidget(QLabel("Q (Process Noise):"))
@@ -385,10 +371,16 @@ class SimulatorGUI(QMainWindow):
                 self.filter_params_layout.addLayout(q_layout)
                 self.filter_params_layout.addLayout(r_layout)
                 self.filter_params_layout.addLayout(gate_thresh_layout)
+
+            # -- PARAMETER FÜR 1-EURO --
+            elif filter_name == "1-Euro Filter":
+                # Baue hier zwei SpinBoxen für min_cutoff und beta
+                # und verbinde sie mit self.active_filter.set_params
+                
+                pass
             
             print(f"Filter gewechselt zu: {filter_name}")
             
-        # 3. Simulation zurücksetzen (da neuer Filter keine Historie hat)
         if hasattr(self, 'is_servoing'):
             self.reset_simulation()
 
