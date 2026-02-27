@@ -129,8 +129,6 @@ class RobotSimulator:
             img = np.clip(img_noisy, 0, 255).astype(np.uint8)
             
         return img
-        
-        return img
 
     def get_pose(self):
         """Gibt die aktuelle Pose für den Plotter zurück"""

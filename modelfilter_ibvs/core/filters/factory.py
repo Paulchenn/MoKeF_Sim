@@ -1,9 +1,7 @@
 # modelfilter_ibvs/core/filters/factory.py
 
-# from .homography import HomographyFilter
 from .skf import StandardKalmanFilter
 from .ekf import ExtendedKalmanFilter
-from .iekf import IteratedExtendedKalmanFilter
 from .eskf import ErrorStateKalmanFilter
 from .ukf import UnscentedKalmanFilter
 from .one_euro import OneEuroFilter
@@ -11,10 +9,8 @@ from .one_euro import OneEuroFilter
 class FilterFactory:
     _registry = {
         "- (Kein Filter)": None,
-        #"Homography Model (SL3)": HomographyFilter,
         "Standard Kalman Filter": StandardKalmanFilter,
         "Extended Kalman Filter": ExtendedKalmanFilter,
-        "Iterated Extended Kalman Filter": IteratedExtendedKalmanFilter,
         "Error-State Kalman Filter": ErrorStateKalmanFilter,
         "Unscented Kalman Filter": UnscentedKalmanFilter,
         "1-Euro Filter": OneEuroFilter

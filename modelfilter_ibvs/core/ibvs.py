@@ -69,12 +69,23 @@ class IBVSController:
         # Gestapelte Matrix (2N x 6)
         Ls = np.vstack(Ls_list)
         
-        # 4. Pseudoinverse berechnen (Moore-Penrose)
+        # # 4. Pseudoinverse berechnen (Moore-Penrose)
+        # # Wir wollen v lösen für: Ls * v = -lambda * error
+        # try:
+        #     Ls_inv = np.linalg.pinv(Ls)
+        # except np.linalg.LinAlgError:
+        #     print("Singularität in Interaktionsmatrix!")
+        #     return np.zeros(6), 0.0
+        
+        # 4. Damped Least Squares (DLS) berechnen (anstelle reiner Pseudoinverse)
         # Wir wollen v lösen für: Ls * v = -lambda * error
+        # Ls ist (2N x 6). DLS für überbestimmte Systeme: (Ls^T Ls + lambda^2 I)^-1 Ls^T
+        damp = 0.05 # Dämpfungsfaktor
         try:
-            Ls_inv = np.linalg.pinv(Ls)
+            I6 = np.eye(6)
+            Ls_inv = np.linalg.inv(Ls.T @ Ls + (damp**2) * I6) @ Ls.T
         except np.linalg.LinAlgError:
-            print("Singularität in Interaktionsmatrix!")
+            print("Singularität in Interaktionsmatrix (DLS fehlgeschlagen)!")
             return np.zeros(6), 0.0
 
         # 5. Regelgesetz: v_c = -lambda * Ls_inv * error

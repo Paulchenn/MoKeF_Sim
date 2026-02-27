@@ -10,7 +10,7 @@
 # Wichtig: Um Pfadfehler zu vermeiden, sollte dieses Skript aus dem Hauptverzeichnis des Projekts gestartet werden (dort, wo auch "sim" und "core" liegen), mit:
 # python -m modelfilter_ibvs.sim.gui_main
 ####################################################################################################
-VERSION = "1.0"
+VERSION = "1.2.2"
 
 import sys, os, cv2
 import numpy as np
@@ -72,6 +72,13 @@ class SimulatorGUI(QMainWindow):
         self.current_img = None
         self.current_raw_features = None
         self.current_matched_ref = None
+
+        # Lade ein beliebiges Bild (muss im gleichen Ordner liegen oder Pfad anpassen)
+        try:
+            self.custom_texture = cv2.imread("modelfilter_ibvs/sim/images/ATP-DDR3-2G-AL56M72B8BJH9S.jpg") 
+        except Exception as e:
+            print(f"Fehler beim Laden des Bildes, nutze Schachbrett: {e}")
+            self.custom_texture = None
         
         self.init_ui()
 
@@ -227,7 +234,7 @@ class SimulatorGUI(QMainWindow):
         # self.update_plots() # Zeichnet die grünen Soll-Punkte ein
 
         # Rendere das Bild
-        img = self.sim.get_camera_image()
+        img = self.sim.get_camera_image(texture_img=self.custom_texture)
 
         # Speichere es als Referenz im Feature-Extractor
         self.vision.set_reference_image(img)
@@ -245,6 +252,11 @@ class SimulatorGUI(QMainWindow):
             self.btn_toggle_servo.setText("Stop Servoing")
             for s in self.sliders: s.setEnabled(False)
             self.sb_threshold.setEnabled(False) # NEU: Eingabefeld ausgrauen
+
+            # Zwinge den aktiven Filter, auf die aktuelle Roboterpose zu springen,
+            # bevor die erste Regler-Geschwindigkeit berechnet wird.
+            if self.active_filter is not None:
+                self.active_filter.force_relocalization()
         else:
             self.btn_toggle_servo.setText("Start Servoing")
             for s in self.sliders: s.setEnabled(True)
@@ -321,32 +333,56 @@ class SimulatorGUI(QMainWindow):
                 
             # -- PARAMETER FÜR EKF / ESKF / UKF --
             elif filter_name in ["Standard Kalman Filter", "Extended Kalman Filter", "Error-State Kalman Filter", "Unscented Kalman Filter"]:
+                if filter_name == "Standard Kalman Filter":
+                    self.active_filter.Q_scalar = 500.0
+                    self.active_filter.R_scalar = 100.0
+                    self.active_filter.gate_thresh = 20.0
+                elif filter_name == "Extended Kalman Filter":
+                    self.active_filter.Q_scalar = 1.0
+                    self.active_filter.R_scalar = 50.0
+                    self.active_filter.gate_thresh = 20.0
+                elif filter_name == "Error-State Kalman Filter":
+                    self.active_filter.Q_scalar = 0.01
+                    self.active_filter.R_scalar = 1.0
+                    self.active_filter.gate_thresh = 20.0
+                elif filter_name == "Unscented Kalman Filter":
+                    self.active_filter.Q_scalar = 0.01
+                    self.active_filter.R_scalar = 1.0
+                    self.active_filter.gate_thresh = 20.0
+
                 # Q-Parameter (Prozessrauschen)
                 q_layout = QHBoxLayout()
                 q_layout.addWidget(QLabel("Q (Process Noise):"))
                 sb_q = QDoubleSpinBox()
-                sb_q.setRange(0.0001, 10.0)
+                sb_q.setRange(0.0001, 1000.0)
                 sb_q.setDecimals(4)
                 sb_q.setSingleStep(0.01)
-                sb_q.setValue(0.0001) # Dein gewünschter Default
+                sb_q.setValue(self.active_filter.Q_scalar) # Dein gewünschter Default
                 
                 # R-Parameter (Messrauschen)
                 r_layout = QHBoxLayout()
                 r_layout.addWidget(QLabel("R (Meas. Noise):"))
                 sb_r = QDoubleSpinBox()
-                sb_r.setRange(0.0001, 10.0)
+                sb_r.setRange(0.0001, 1000.0)
                 sb_r.setDecimals(4)
                 sb_r.setSingleStep(0.01)
-                sb_r.setValue(0.005) # Dein gewünschter Default
+                sb_r.setValue(self.active_filter.R_scalar) # Dein gewünschter Default
                 
-                # R-Parameter (Messrauschen)
+                # Gate Threshold (Outlier Detection)
                 gate_thresh_layout = QHBoxLayout()
                 gate_thresh_layout.addWidget(QLabel("gate thresh:"))
                 sb_gate_thresh = QDoubleSpinBox()
                 sb_gate_thresh.setRange(1, 100.0)
                 sb_gate_thresh.setDecimals(1)
                 sb_gate_thresh.setSingleStep(1)
-                sb_gate_thresh.setValue(20) # Dein gewünschter Default
+                sb_gate_thresh.setValue(self.active_filter.gate_thresh) # Dein gewünschter Default
+
+                # Relocalization erzwingen (beim druecken des Buttons)
+                relocate_layout = QHBoxLayout()
+                btn_relocate = QPushButton("Force Relocalization")
+                btn_relocate.clicked.connect(lambda: self.active_filter.force_relocalization())
+                relocate_layout.addWidget(btn_relocate)
+
                 
                 # Update-Funktion für den EKF
                 def update_ekf_params():
@@ -371,6 +407,7 @@ class SimulatorGUI(QMainWindow):
                 self.filter_params_layout.addLayout(q_layout)
                 self.filter_params_layout.addLayout(r_layout)
                 self.filter_params_layout.addLayout(gate_thresh_layout)
+                self.filter_params_layout.addLayout(relocate_layout)
 
             # -- PARAMETER FÜR 1-EURO --
             elif filter_name == "1-Euro Filter":
@@ -390,7 +427,7 @@ class SimulatorGUI(QMainWindow):
 
         # 1. Datenbeschaffung
         # Übergebe den Noise Level an das gerenderte Bild (Bilder rendern & Keypoints extrahieren)
-        self.current_img = self.sim.get_camera_image(noise_std=self.noise_level)
+        self.current_img = self.sim.get_camera_image(noise_std=self.noise_level, texture_img=self.custom_texture)
         
         if self.simulate_glare:
             # Bei Blendung blenden wir das Bild in der GUI weiß aus
@@ -452,16 +489,21 @@ class SimulatorGUI(QMainWindow):
             # gesehen viel größer. Wir mitteln den Fehler für die Anzeige/Stopp.
             avg_error = error_norm / features_for_control.shape[1]
             self.lbl_error.setText(f"Avg Error: {avg_error:.4f}")
-            
+
             # Transformiere v_cam_cmd zu v_ee_cmd ...
-            # v_ee_cmd berechnen ...
             R = self.sim.T_ee_cam.R; t = self.sim.T_ee_cam.t
             v_lin = R @ v_cam_cmd[0:3]; v_ang = R @ v_cam_cmd[3:6]
             v_lin = v_lin + np.cross(t, v_ang)
             v_ee_cmd = np.concatenate((v_lin, v_ang))
 
-            J_pinv = np.linalg.pinv(J)
-            q_dot = J_pinv @ v_ee_cmd * 0.5 # Gain etwas runter
+            # --- Damped Least Squares (DLS) für die Roboter-Kinematik ---
+            # Verhindert, dass der Roboter an kinematischen Singularitäten ausrastet
+            damp_robot = 0.1 
+            I6 = np.eye(6)
+            # Für 6x6 Matrix J: J^T * (J * J^T + lambda^2 * I)^-1
+            J_dls_inv = J.T @ np.linalg.inv(J @ J.T + (damp_robot**2) * I6)
+            
+            q_dot = J_dls_inv @ v_ee_cmd * 0.5 # Gain etwas runter, damit es nicht zu ruckartig wird
             
             # SPEICHERN für nächsten Filter Schritt!
             self.current_q_dot = q_dot 
@@ -551,16 +593,16 @@ class SimulatorGUI(QMainWindow):
         x_pos = 0.05; y_pos = 0.9
         if self.active_filter is not None:
             status_filter = self.active_filter.status
-            if status_filter == "INIT":
-                self.ax_cam.text(x_pos, y_pos, "Filter: INIT (Not Ready)", fontsize=10, bbox=dict(facecolor='yellow'), transform=self.ax_cam.transAxes)
-            elif status_filter == "PREDICT":
-                self.ax_cam.text(x_pos, y_pos, "Filter: PREDICTING", fontsize=10, bbox=dict(facecolor='lightblue'), transform=self.ax_cam.transAxes)
-            elif status_filter == "MISSING":
-                self.ax_cam.text(x_pos, y_pos, "Filter: MISSING (No Data)", fontsize=10, bbox=dict(facecolor='red'), transform=self.ax_cam.transAxes)
-            elif status_filter == "REJECT (GLARE)":
-                self.ax_cam.text(x_pos, y_pos, "Filter: REJECT (Glare)", fontsize=10, bbox=dict(facecolor='red'), transform=self.ax_cam.transAxes)
-            elif status_filter == "UPDATE":
-                self.ax_cam.text(x_pos, y_pos, "Filter: UPDATE", fontsize=10, bbox=dict(facecolor='lightgreen'), transform=self.ax_cam.transAxes)
+            if "INIT" in status_filter:
+                self.ax_cam.text(x_pos, y_pos, f"Filter: {status_filter}", fontsize=10, bbox=dict(facecolor='yellow'), transform=self.ax_cam.transAxes)
+            elif "PREDICT" in status_filter:
+                self.ax_cam.text(x_pos, y_pos, f"Filter: {status_filter}", fontsize=10, bbox=dict(facecolor='lightblue'), transform=self.ax_cam.transAxes)
+            elif "MISSING" in status_filter:
+                self.ax_cam.text(x_pos, y_pos, f"Filter: {status_filter}", fontsize=10, bbox=dict(facecolor='red'), transform=self.ax_cam.transAxes)
+            elif "REJECT" in status_filter:
+                self.ax_cam.text(x_pos, y_pos, f"Filter: {status_filter}", fontsize=10, bbox=dict(facecolor='red'), transform=self.ax_cam.transAxes)
+            elif "UPDATE" in status_filter:
+                self.ax_cam.text(x_pos, y_pos, f"Filter: {status_filter}", fontsize=10, bbox=dict(facecolor='lightgreen'), transform=self.ax_cam.transAxes)
             else:
                 self.ax_cam.text(x_pos, y_pos, f"Filter: {status_filter} (UNKNOWN)", fontsize=10, bbox=dict(facecolor='gray'), transform=self.ax_cam.transAxes)
         else:

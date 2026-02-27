@@ -2373,17 +2373,28 @@
     <bcf:datasource type="file" datatype="bibtex" glob="false">bib.bib</bcf:datasource>
   </bcf:bibdata>
   <bcf:section number="0">
-    <bcf:citekey order="1" intorder="1">casiez20121c</bcf:citekey>
-    <bcf:citekey order="2" intorder="1">kalman1960new</bcf:citekey>
-    <bcf:citekey order="3" intorder="1">welch2006introduction</bcf:citekey>
-    <bcf:citekey order="4" intorder="1">thrun2005probabilistic</bcf:citekey>
-    <bcf:citekey order="5" intorder="1">julier1997new</bcf:citekey>
-    <bcf:citekey order="6" intorder="1">forster2017manifold</bcf:citekey>
-    <bcf:citekey order="7" intorder="1">sola2017quaternion</bcf:citekey>
-    <bcf:citekey order="8" intorder="1">kuipers1999quaternions</bcf:citekey>
-    <bcf:citekey order="9" intorder="1">corke2017robotics</bcf:citekey>
-    <bcf:citekey order="10" intorder="1">chaumette2006visual</bcf:citekey>
-    <bcf:citekey order="11" intorder="1">casiez20121euro</bcf:citekey>
+    <bcf:citekey order="1" intorder="1">bar2001estimation</bcf:citekey>
+    <bcf:citekey order="2" intorder="1">williams2007real</bcf:citekey>
+    <bcf:citekey order="3" intorder="1">casiez20121euro</bcf:citekey>
+    <bcf:citekey order="4" intorder="1">malis19992half</bcf:citekey>
+    <bcf:citekey order="4" intorder="2">benhimane2007homography</bcf:citekey>
+    <bcf:citekey order="5" intorder="1">comport2006real</bcf:citekey>
+    <bcf:citekey order="6" intorder="1">chaumette2006visual</bcf:citekey>
+    <bcf:citekey order="7" intorder="1">corke1996dynamic</bcf:citekey>
+    <bcf:citekey order="8" intorder="1">wampler1986manipulator</bcf:citekey>
+    <bcf:citekey order="9" intorder="1">kalman1960new</bcf:citekey>
+    <bcf:citekey order="10" intorder="1">welch2006introduction</bcf:citekey>
+    <bcf:citekey order="11" intorder="1">thrun2005probabilistic</bcf:citekey>
+    <bcf:citekey order="12" intorder="1">julier1997new</bcf:citekey>
+    <bcf:citekey order="13" intorder="1">forster2017manifold</bcf:citekey>
+    <bcf:citekey order="14" intorder="1">sola2017quaternion</bcf:citekey>
+    <bcf:citekey order="15" intorder="1">kuipers1999quaternions</bcf:citekey>
+    <bcf:citekey order="16" intorder="1">corke2017robotics</bcf:citekey>
+    <bcf:citekey order="17" intorder="1">chaumette2006visual</bcf:citekey>
+    <bcf:citekey order="18" intorder="1">casiez20121euro</bcf:citekey>
+    <bcf:citekey order="19" intorder="1">comport2006real</bcf:citekey>
+    <bcf:citekey order="20" intorder="1">chaumette2006visual</bcf:citekey>
+    <bcf:citekey order="21" intorder="1">corke1996dynamic</bcf:citekey>
   </bcf:section>
   <!-- SORTING TEMPLATES -->
   <bcf:sortingtemplate name="none">

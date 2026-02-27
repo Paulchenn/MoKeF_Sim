@@ -13,6 +13,10 @@
 
 \begin{document}
 
+
+
+
+
 \section{Der Standard Kalman-Filter für 2D-Feature-Tracking}
 \label{sec:standard_kf}
 
@@ -23,6 +27,9 @@ Der Standard Kalman-Filter (KF) ist ein optimaler rekursiver Schätzer für line
 \end{equation}
 
 Der Filter arbeitet nun in zwei rekursiven Schritten: Prädiktion (\textit{a priori} Schätzung) und Korrektur (\textit{a posteriori} Schätzung). Wir verwenden die Notation $\mathbf{x}_{k|k-1}$, was bedeutet: \enquote{Der geschätzte Zustand zum Zeitpunkt $k$, basierend auf dem Wissen bis zum Zeitpunkt $k-1$}.
+
+
+
 
 \subsection{Prädiktion (Predict)}
 In diesem Schritt wird der Zustand basierend auf dem Systemmodell in die Zukunft projiziert. Die Matrix $F$ beschreibt die lineare Kinematik (bei konstanter Geschwindigkeit gilt $u_k=u_{k-1}+\dot{u}_{k-1}\Delta t$). $Q$ ist die Prozessrauschkovarianz (Modellunsicherheit).
@@ -49,6 +56,9 @@ Für das 2D-CV-Modell mit der Zeitschrittweite $\Delta t$ gilt die Systemmatrix 
 \end{equation}
 
 $Q$ (Prozessrauschkovarianz): Dies ist ein Tuning-Parameter. Er modelliert externe Einflüsse, die unser CV-Modell verletzen (z. B. plötzliche Beschleunigungen des Objekts oder der Kamera). Je höher Q, desto weniger vertraut der Filter seinem eigenen physikalischen Modell.
+
+
+
 
 \subsection{Korrektur (Update)}
 Sobald eine neue Messung (nur die Pixelkoordinaten, nicht die Geschwindigkeiten)
@@ -102,6 +112,9 @@ Sobald eine neue Messung (nur die Pixelkoordinaten, nicht die Geschwindigkeiten)
         \end{itemize}
 \end{enumerate}
 
+
+
+
 \subsection{Bedeutung das für das IBVS-Projekt und Limitationen}
 Wenn \textit{xfeat} ausfällt (Okklusion), wird der Update-Schritt übersprungen und nutzt für ein paar Frames nur den Predict-Schritt ($\mathbf{x}_{k|k} = \mathbf{x}_{k|k-1}$). Der Roboter folgt dem Objekt mit der zuletzt berechneten konstanten Geschwindigkeit weiter, bis xfeat den Keypoint wiederfindet.
 
@@ -116,12 +129,66 @@ In der realen Robotik und Computervision ist jedoch fast alles nichtlinear:
 Wenn eine Gauß-Verteilung (Kovarianz $P$) durch eine nichtlineare Funktion geleitet wird, ist das Ergebnis keine Gauß-Verteilung mehr. Der Standard-Filter würde schnell divergieren (die Spur verlieren).
 
 
+
+
+\subsection{Praktisches Tuning und Mahalanobis-Gating}
+Die Parametrisierung der Rauschmatrizen $Q$ und $R$ muss die physikalische Skalierung des Bildraums (Pixel) widerspiegeln.
+\begin{itemize}
+    \item \textbf{Messrauschen $R$:} Wird empirisch auf Basis des Jitters des Feature-Matchers (z.~B. \textit{xfeat}) gesetzt. Bei Schwankungen von ca. $\pm 10$ Pixeln ergibt sich eine Varianz von $R = 100.0$.
+    \item \textbf{Prozessrauschen $Q$:} Da das 2D-CV-Modell die Roboterkinematik ignoriert, ist der Modellfehler bei Beschleunigungen enorm. $Q$ muss entsprechend groß gewählt werden (z.~B. $Q = 500.0$), damit der Filter der Messung ausreichend vertraut und Filter-Lag minimiert wird.
+    \item \textbf{Mahalanobis-Gate:} Die 4 virtuellen Proxy-Punkte (2D) erzeugen einen Messvektor mit $m = 8$ Freiheitsgraden (DoF). Laut der $\chi^2$-Verteilungstabelle liegt der Schwellenwert für 8 DoF bei einem 99\,\%-Konfidenzintervall bei exakt $\gamma = 20.09$. Dieser theoretische Wert erzielt in der Praxis äußerst robuste Ergebnisse bei der Ausreißerunterdrückung.
+\end{itemize}
+
+Der Schwellenwert $\gamma$ wird aus der Umkehrfunktion der $\chi^2$-Verteilung entnommen~\cite{bar2001estimation}. Die Anzahl der Freiheitsgrade (DoF) entspricht der Dimension des Messvektors $z_k$. In Tabelle \ref{tab:chi_square} sind typische Gating-Schwellenwerte für das visuelle Tracking aufgeführt.
+
+\begin{table}[h]
+    \centering
+    \begin{tabular}{c | c | c}
+        \textbf{Freiheitsgrade (DoF)} & $\gamma$ \textbf{für 95\,\% Konfidenz} & $\gamma$ \textbf{für 99\,\% Konfidenz} \\
+        \hline
+        2 (z.~B. 1 Pixel) & 5.99 & 9.21 \\
+        4 (z.~B. 2 Pixel) & 9.49 & 13.28 \\
+        6 (z.~B. 3D Pose) & 12.59 & 16.81 \\
+        8 (z.~B. 4 Proxy-Pixel) & 15.51 & \textbf{20.09} \\
+    \end{tabular}
+    \caption{Auszug aus der $\chi^2$-Verteilungstabelle für das Measurement-Gating.}
+    \label{tab:chi_square}
+\end{table}
+
+
+
+
+\subsection{Tracking Recovery und Relokalisation}
+Ein robustes IBVS-System muss in der Lage sein, nach temporären Verdeckungen (Occlusions), Sensorfehlern oder manuellen Eingriffen (Teleportation des Roboters) die Objektverfolgung wieder aufzunehmen. Verbleibt der Kalman-Filter über eine längere Sequenz im Reject-Status (ausgelöst durch das Mahalanobis-Gate), divergiert die Prädiktion unweigerlich von der Realität.
+
+Um ein \textit{Deadlocking} des Filters zu verhindern, wird eine explizite Relokalisations-Logik (Tracking Recovery) implementiert~\cite{williams2007real}. Bei Reaktivierung des Regelkreises (oder nach einem Timeout von $N$ verworfenen Frames) wird ein harter Reset des Filterzustands erzwungen:
+\begin{enumerate}
+    \item Die Fehlerkovarianzmatrix wird auf einen initialen, sehr hohen Wert zurückgesetzt (z.~B. $P = 1000 \cdot I$), was einer maximalen Unsicherheit des aktuellen Modells entspricht.
+    \item Der Zustandsvektor $x$ wird direkt mit der aktuellen, ungefilterten Messung $z_k$ (gewonnen aus der RANSAC-Homographie) überschrieben.
+\end{enumerate}
+Durch diesen Eingriff verliert der Filter kurzzeitig seine Glättungseigenschaften, kann sich jedoch instantan an stark veränderte Umgebungsbedingungen anpassen und den Regelfehler für den IBVS-Controller wieder valide berechnen.
+
+
+
+
+\subsection{Systemverhalten bei Messausfällen (Drift-Phänomen)}
+Ein inhärentes Problem des Constant-Velocity-Modells zeigt sich bei langanhaltenden Ausreißern (z.~B. durch starke Verdeckungen oder abrupte, unmodellierte Roboterbewegungen, die vom Gating abgelehnt werden). 
+
+Wird der Update-Schritt über mehrere Frames hinweg übersprungen, greift das System ausschließlich auf den Prädiktionsschritt zurück. Der Filter integriert die zuletzt geschätzte Pixel-Geschwindigkeit ($\dot{u}, \dot{v}$) unkorrigiert weiter. Dies führt zu einem linearen Drift der Proxy-Punkte im Bildraum. Während dieses Verhalten bei echten kurzzeitigen Verdeckungen (Occlusions) erwünscht ist, da die Objektbewegung prädiziert wird, führt es bei plötzlichen Stopps des Roboters zu einer starken Divergenz zwischen dem gefilterten Zustand und der realen Szene.
+
+
+
+
+
 \section{Der Extended Kalman Filter (EKF) und Linearisierung}
 \label{sec:ekf}
 
 Sobald das Systemmodell oder das Messmodell nichtlinear werden -- was in der visuellen Robotik (IBVS) aufgrund von Kameramodellen und Rotationskinematik der Regelfall ist -- versagt der Standard Kalman-Filter. Der Extended Kalman Filter (EKF) löst dies durch eine lokale Linearisierung mittels einer Taylorreihenentwicklung erster Ordnung.
 
 Die konstanten Matrizen $F$ und $H$ werden durch nichtlineare Funktionen $f(x)$ und $h(x)$ ersetzt. Der EKF berechnet in jedem Zeitschritt $k$ die zugehörigen Jacobi-Matrizen (partielle Ableitungen) $F_k$ und $H_k$, evaluiert am aktuellen Schätzpunkt.
+
+
+
 
 \subsection{EKF Prädiktion und Update}
 Die Prädiktion des Zustands erfolgt direkt über die nichtlineare Systemfunktion $f$:
@@ -138,6 +205,9 @@ Die Korrektur nutzt die nichtlineare Messfunktion $h$ für das Residuum und die 
     x_{k|k} &= x_{k|k-1} + K_k \tilde{y}_k \\
     P_{k|k} &= (I - K_k H_k) P_{k|k-1}
 \end{align}
+
+
+
 
 \subsection{Beispiel: Jacobi-Matrix eines Lochkameramodells}
 Projiziert man einen 3D-Punkt $x = [X, Y, Z]^T$ auf eine Bildebene $(u,v)$, lautet die nichtlineare Messfunktion $h(x)$ unter Annahme der Brennweiten $f_x, f_y$ und des Hauptpunktes $(c_x, c_y)$:
@@ -166,6 +236,9 @@ Der Extended Kalman Filter (EKF) verliert an Genauigkeit, wenn die System- oder 
 
 Das Kernkonzept des UKF ist es, nicht die Funktion zu approximieren, sondern die Wahrscheinlichkeitsverteilung.
 
+
+
+
 \subsection{Die Unscented Transform (UT) und Sigma-Punkte}
 Für einen $n$-dimensionalen Zustandsvektor $x$ mit Mittelwert $\mu$ und Kovarianz $P$ wählt der UKF deterministisch $2n + 1$ sogenannte Sigma-Punkte $\mathcal{X}^{(i)}$ aus. Diese Punkte repräsentieren die Verteilung exakt bis zur zweiten Ordnung (Mittelwert und Kovarianz).
 
@@ -178,6 +251,9 @@ Die Berechnung der Sigma-Punkte erfolgt typischerweise über die Matrixwurzel de
 Dabei ist $\lambda$ ein Skalierungsparameter, der die Streuung der Sigma-Punkte um den Mittelwert steuert, und der Index $i$ bezeichnet die $i$-te Spalte der Matrixwurzel.
 
 Jedem Sigma-Punkt $\mathcal{X}^{(i)}$ werden Gewichte für den Mittelwert $W_m^{(i)}$ und für die Kovarianz $W_c^{(i)}$ zugeordnet.
+
+
+
 
 \subsection{Prädiktion und Update ohne Linearisierung}
 Anstatt Jacobi-Matrizen zu berechnen, werden die Sigma-Punkte direkt durch die nichtlinearen Funktionen $f$ (Systemmodell) oder $h$ (Messmodell) propagiert. Für das Messmodell (wie unser Kameramodell im IBVS) bedeutet das:
@@ -193,6 +269,10 @@ Der prädizierte Messmittelwert $\hat{z}$ und die zugehörige Kovarianz $S$ erge
 
 \textbf{Fazit für IBVS-Anwendungen:} Der UKF eliminiert die Notwendigkeit fehleranfälliger analytischer Ableitungen für komplexe Kameraprojektionen und Roboterkinematiken. Er liefert bei starken Nichtlinearitäten eine präzisere Schätzung als der EKF, ist jedoch rechnerisch oft etwas aufwendiger, da $2n+1$ Punkte pro Zeitschritt propagiert werden müssen.
 
+
+
+
+
 \section{Der Error-State Kalman Filter (ESKF)}
 \label{sec:eskf}
 
@@ -203,6 +283,9 @@ Für Systeme, die 3D-Rotationen beinhalten (z.~B. freifliegende Kameras im IBVS-
 \end{equation}
 
 Hierbei ist $x_t$ der wahre Zustand, $x$ der Nominalzustand (Integration der Systemkinematik ohne Rauschen) und $\delta x$ der Fehlerzustand (Error-State). Der Operator $\oplus$ steht für die Zustandskomposition (Addition für Translationen, Multiplikation für Quaternionen). Der Filter schätzt \textit{ausschließlich} den Fehlerzustand $\delta x$, der für Rotationen minimal parametrisiert werden kann (als 3D-Vektor $\delta \theta$).
+
+
+
 
 \subsection{ESKF Prädiktion (Predict)}
 Der Nominalzustand $x$ wird analog zum EKF deterministisch und rauschfrei über das nichtlineare Systemmodell $f$ propagiert:
@@ -215,6 +298,9 @@ Die Prädiktion des Fehlerzustands ist im Erwartungswert Null ($\delta x_{k|k-1}
     P_{k|k-1} = F_{\delta x} P_{k-1|k-1} F_{\delta x}^T + F_i Q F_i^T
 \end{equation}
 Dabei ist $F_{\delta x}$ die Jacobi-Matrix der zeitdiskreten Fehlerkinematik ($F_{\delta x} = \frac{\partial f_{\delta x}}{\partial \delta x}$) und $F_i$ die Rausch-Eingangsmatrix, die das Prozessrauschen $Q$ (z.~B. IMU-Rauschen) korrekt in den Zustandsraum mappt.
+
+
+
 
 \subsection{ESKF Korrektur (Update) und die Kettenregel}
 Liegt eine Messung $z_k$ vor, wird das Residuum $\tilde{y}_k$ bezüglich des unkorrigierten Nominalzustands mittels der Standard-Messfunktion $h(x)$ gebildet:
@@ -243,6 +329,9 @@ Der Filter schätzt nun den aktuellen Fehlerzustand und aktualisiert die Kovaria
     P_{k|k} &= (I - K_k H_{\delta x}) P_{k|k-1}
 \end{align}
 
+
+
+
 \subsection{Injektion und Reset}
 Abschließend wird der geschätzte Fehler in den Nominalzustand injiziert, um diesen zu korrigieren. Da der Fehler nun Teil des Nominalzustands ist, wird der Fehlerzustand für den nächsten rekursiven Schritt zurückgesetzt (Reset):
 
@@ -252,10 +341,15 @@ Abschließend wird der geschätzte Fehler in den Nominalzustand injiziert, um di
 \end{align}
 Dieser Reset-Mechanismus sorgt dafür, dass der Fehlerzustand stets nahe Null bleibt, wodurch die Linearisierungsfehler des EKF minimiert werden.
 
+
+
+
 \subsection{ESKF Beispiel: 3D-Orientierungstracking (Attitude Estimation)}
 \label{sec:eskf_example}
 
 Um den ESKF zu veranschaulichen, betrachten wir das reine Tracking der 3D-Kameraorientierung. Der Nominalzustand ist das Quaternion $q$, der Fehlerzustand der 3D-Rotationsvektor $\delta \theta$. Die Eingabe $u$ ist die Winkelgeschwindigkeit $\omega$ eines Gyroskops. Die Messung $z$ ist die Beobachtung eines bekannten 3D-Weltpunktes $p_w$ im Kamerabild.
+
+
 
 \subsubsection{1. Prädiktion (Nominal- und Fehlerzustand)}
 Die physikalische Prädiktion des Nominalquaternions $q$ erfolgt durch Integration der Winkelgeschwindigkeit $\omega_k$ über das Zeitintervall $\Delta t$:
@@ -269,6 +363,8 @@ Die Prädiktion des Fehlerzustands bleibt $\delta \theta_{k|k-1} = 0$. Die zugeh
     P_{k|k-1} = \underbrace{\left(I_{3\times3} - [\omega_k \times] \Delta t\right)}_{F_{\delta x}} P_{k-1|k-1} F_{\delta x}^T + Q \Delta t^2
 \end{equation}
 Hierbei ist $[\omega_k \times]$ die schiefsymmetrische Matrix des Vektors $\omega_k$.
+
+
 
 \subsubsection{2. Korrektur (Update)}
 Zur Berechnung des Residuums projiziert das Nominalquaternion $q_{k|k-1}$ den Weltpunkt in das Kamera-Koordinatensystem, was den erwarteten Punkt $\hat{p}_c$ ergibt:
@@ -289,12 +385,17 @@ Mit dieser kompakten $3 \times 3$ Matrix $H_{\delta x}$ wird der Standard-Update
     P_{k|k} &= (I_{3\times3} - K_k H_{\delta x}) P_{k|k-1}
 \end{align}
 
+
+
 \subsubsection{3. Injektion und Reset}
 Der berechnete 3D-Korrekturwinkel $\delta \theta_{k|k}$ wird als Fehler-Quaternion formuliert und auf den Nominalzustand aufmultipliziert (Injiziert):
 \begin{equation}
     q_{k|k} = q_{k|k-1} \otimes \exp\left(\frac{1}{2} \delta \theta_{k|k}\right)
 \end{equation}
 Anschließend wird der Fehlerzustand für den nächsten Zyklus zurückgesetzt: $\delta \theta \leftarrow 0$.
+
+
+
 
 
 \section{Ausreißererkennung (Outlier Rejection) mittels Mahalanobis-Distanz}
@@ -304,6 +405,9 @@ In IBVS-Anwendungen sind Feature-Matcher (wie \textit{xfeat}) anfällig für fal
 
 Um dies zu verhindern, wird ein Gating-Verfahren angewendet, das Messungen vor dem Update-Schritt auf statistische Plausibilität prüft.
 
+
+
+
 \subsection{Die Mahalanobis-Distanz}
 Anstelle der unskalierten euklidischen Distanz im Bildraum wird die Mahalanobis-Distanz verwendet. Sie gewichtet das Residuum $\tilde{y}_k$ (die Differenz zwischen Messung und Prädiktion) mit der Innovationskovarianz $S_k$. Die Matrix $S_k$ repräsentiert die kombinierte Unsicherheit aus Systemmodell und Messrauschen.
 
@@ -311,6 +415,9 @@ Die quadrierte Mahalanobis-Distanz $D^2$ berechnet sich als:
 \begin{equation}
     D^2 = \tilde{y}_k^T S_k^{-1} \tilde{y}_k
 \end{equation}
+
+
+
 
 \subsection{Gating mittels Chi-Quadrat-Test ($\chi^2$)}
 Unter der Annahme von normalverteiltem Rauschen folgt die Variable $D^2$ einer $\chi^2$-Verteilung mit $m$ Freiheitsgraden (Degrees of Freedom, DoF), wobei $m$ der Dimension der Messung entspricht. Für 2D-Feature-Tracking im Bildraum gilt $m = 2$.
@@ -333,10 +440,16 @@ Wird eine Messung als Ausreißer klassifiziert, wird der Update-Schritt vollstä
 Dies ermöglicht es dem System, kurzzeitige Fehler oder Verdeckungen (Occlusions) des Keypoints robust zu überbrücken.
 
 
+
+
+
 \section{Praktisches Filter-Tuning: Bestimmung von $Q$ und $R$}
 \label{sec:tuning}
 
 Die Leistungsfähigkeit des Kalman-Filters hängt maßgeblich von der korrekten Parametrisierung der Prozessrauschkovarianz $Q$ und der Messrauschkovarianz $R$ ab. Diese Matrizen steuern die Gewichtung (Kalman-Gain) zwischen dem physikalischen Prädiktionsmodell und den tatsächlichen Sensormessungen.
+
+
+
 
 \subsection{Messrauschen $R$ (Sensormodell)}
 Die Matrix $R$ beschreibt die Unsicherheit der Beobachtung. In einem IBVS-System mit Keypoint-Tracking repräsentiert sie den Pixel-Jitter des Matchers (z.~B. \textit{xfeat}). Sie lässt sich empirisch ermitteln, indem die Varianz $\sigma^2$ der Pixelkoordinaten $(u,v)$ eines statischen Ziels über mehrere Frames gemessen wird. Unter der Annahme von unkorreliertem Rauschen in u- und v-Richtung ergibt sich eine Diagonalmatrix:
@@ -345,14 +458,24 @@ Die Matrix $R$ beschreibt die Unsicherheit der Beobachtung. In einem IBVS-System
 \end{equation}
 Ein großes $R$ führt zu starker Glättung (der Filter vertraut der Messung wenig), erhöht jedoch die Latenz (Lag).
 
+
+
+
 \subsection{Prozessrauschen $Q$ (Systemmodell)}
 Die Matrix $Q$ modelliert die Unsicherheit des Systemmodells, also Effekte, die analytisch nicht erfasst wurden. Bei Verwendung eines Constant-Velocity (CV) Modells repräsentiert $Q$ die unmodellierten Beschleunigungen des Objekts.
 Die Bestimmung von $Q$ ist in der Praxis oft heuristisch. Ein zu klein gewähltes $Q$ führt zu einem trägen Filter, der echten Richtungswechseln des Objekts nicht schnell genug folgt (Filter-Lag oder Divergenz). Ein zu großes $Q$ degradiert den Kalman-Filter zu einem reinen Beobachter, der das Messrauschen ungedämpft an den Regler weitergibt. Das Tuning ist ein Kompromiss (Trade-off) zwischen Glättung (Smoothness) und Reaktionsgeschwindigkeit (Responsiveness).
+
+
+
+
 
 \section{Der 1\euro{} Filter (One Euro Filter)}
 \label{sec:one_euro_filter}
 
 Für das reine Glätten von 2D-Pixelkoordinaten in IBVS-Anwendungen, bei denen keine komplexe Sensorfusion oder physikalische Systemmodellierung erforderlich ist, stellt der 1\euro{} Filter eine hocheffiziente Alternative zum Kalman-Filter dar. Er adressiert direkt den Trade-off zwischen Jitter (Zittern im Stillstand) und Lag (Latenz bei Bewegung).
+
+
+
 
 \subsection{Prinzip der adaptiven exponentiellen Glättung}
 Der 1\euro{} Filter ist ein Tiefpassfilter erster Ordnung (exponentielle Glättung), dessen Glättungsfaktor $\alpha$ nicht konstant ist, sondern dynamisch an die Änderungsrate (Geschwindigkeit) des Signals angepasst wird. Die Grundgleichung lautet:
@@ -363,6 +486,9 @@ Dabei ist $x_i$ die verrauschte Eingabe zum Zeitschritt $i$ und $\hat{x}_i$ der 
 \begin{equation}
     \alpha(f_c, T_e) = \frac{T_e}{T_e + \frac{1}{2 \pi f_c}}
 \end{equation}
+
+
+
 
 \subsection{Exkurs: Frequenzbereich und Grenzfrequenz ($f_c$)}
 \label{sec:cutoff_frequency}
@@ -378,6 +504,9 @@ Im Kontext des Objekt-Trackings bestimmt $f_c$ den fundamentalen Trade-off des F
 \end{itemize}
 
 Der 1\euro{} Filter löst diesen Konflikt, indem er $f_c$ nicht als Konstante definiert, sondern sie dynamisch in Abhängigkeit der aktuellen Signaländerungsrate moduliert.
+
+
+
 
 \subsection{Dynamische Grenzfrequenz}
 Die Kerninnovation des Filters besteht darin, die Grenzfrequenz $f_c$ als lineare Funktion der gefilterten Änderungsrate $|\hat{\dot{x}}_i|$ zu definieren:
@@ -399,10 +528,17 @@ Die Änderungsrate (Geschwindigkeit) wird zur Rauschunterdrückung intern ebenfa
 
 \textbf{Fazit für IBVS:} Der 1\euro{} Filter benötigt pro Signal (z.~B. u- und v-Koordinate separat) nur zwei Tuning-Parameter ($f_{min}$ und $\beta$), bewahrt eine $O(1)$-Komplexität in Laufzeit und Speicher und ist extrem robust gegen verrauschte Keypoint-Matcher.
 
+
+
+
+
 \section{Praktisches Tuning des 1\euro{} Filters}
 \label{sec:one_euro_tuning}
 
-Ein wesentlicher Vorteil des 1\euro{} Filters gegenüber stochastischen Schätzern (wie dem Kalman-Filter) ist sein entkoppeltes und intuitives Tuning-Verfahren. Die Parameter $f_{min}$ (minimale Grenzfrequenz) und $\beta$ (Geschwindigkeits-Koeffizient) können systematisch in zwei unabhängigen Schritten am realen System appliziert werden, wie von den Autoren \cite{casiez20121c} vorgeschlagen.
+Ein wesentlicher Vorteil des 1\euro{} Filters gegenüber stochastischen Schätzern (wie dem Kalman-Filter) ist sein entkoppeltes und intuitives Tuning-Verfahren. Die Parameter $f_{min}$ (minimale Grenzfrequenz) und $\beta$ (Geschwindigkeits-Koeffizient) können systematisch in zwei unabhängigen Schritten am realen System appliziert werden, wie von den Autoren~\cite{casiez20121euro} vorgeschlagen.
+
+
+
 
 \subsection{Schritt 1: Minimierung des Jitters (Statische Phase)}
 Ziel des ersten Schrittes ist die Eliminierung des hochfrequenten Messrauschens (Jitter) im Stillstand.
@@ -411,6 +547,9 @@ Ziel des ersten Schrittes ist die Eliminierung des hochfrequenten Messrauschens 
     \item Das zu trackende Objekt (bzw. die Kamera) wird in Ruhe gehalten.
     \item Der Parameter $f_{min}$ wird ausgehend von einem Startwert (z.~B. $1.0\,\text{Hz}$) iterativ verringert, bis der sichtbare Jitter im Ausgangssignal $\hat{x}_i$ ein für das IBVS-System tolerierbares Minimum erreicht hat. Typische Werte liegen im Bereich von $0.01\,\text{Hz}$ bis $1.0\,\text{Hz}$.
 \end{enumerate}
+
+
+
 
 \subsection{Schritt 2: Minimierung des Lags (Dynamische Phase)}
 Durch den niedrigen Wert von $f_{min}$ weist der Filter nun eine starke Phasenverschiebung (Lag) bei Signaländerungen auf. Ziel des zweiten Schrittes ist es, diese Latenz bei Bewegung zu eliminieren.
@@ -422,29 +561,178 @@ Durch den niedrigen Wert von $f_{min}$ weist der Filter nun eine starke Phasenve
 \end{enumerate}
 Die Grenzfrequenz für die Geschwindigkeitsfilterung ($f_{c_d}$) wird in der Regel konstant auf $1.0\,\text{Hz}$ belassen, da sich dieser Wert empirisch für die meisten kinematisches Tracking-Aufgaben als robust erwiesen hat.
 
+\section{Umgang mit variierenden Feature-Mengen:\newline Transformations-basiertes Filtern}
+\label{sec:transformation_filtering}
+
+Moderne merkmalsbasierte Detektoren und Matcher (wie \textit{xfeat}, ORB oder SuperPoint) extrahieren in jedem Frame eine unterschiedliche Anzahl an Keypoints $N_k$. Zudem weisen diese Punkte keine zeitliche Konsistenz (feste IDs) auf. Da rekursive Schätzer (wie der Kalman-Filter oder der 1\euro{} Filter) einen Zustandsvektor $x$ mit konstanter Dimension voraussetzen, ist das direkte Filtern individueller Pixelkoordinaten in solchen dynamischen Szenarien nicht trivial möglich.
+
+Die etablierte Lösung in der visuellen Servoregelung (IBVS) ist der Übergang vom Punkt-Raum in den Transformations-Raum~\cite{malis19992half, benhimane2007homography}.
+
+
+
+
+\subsection{Schätzung und Filterung der Homographie-Matrix}
+Anstatt $N_k$ Punkte zu filtern, wird die globale projektive Transformation zwischen dem Referenzbild (Soll-Zustand) und dem aktuellen Kamerabild geschätzt. 
+Unter der Annahme einer planaren Szene (wie in vielen industriellen IBVS-Anwendungen) wird diese Transformation durch eine $3 \times 3$ Homographie-Matrix $H$ beschrieben:
+\begin{equation}
+    p_{curr} \sim H \cdot p_{ref}
+\end{equation}
+wobei $p_{curr}$ und $p_{ref}$ die homogenen Pixelkoordinaten der gematchten Punkte sind.
+
+Der Prozess gliedert sich in drei Schritte:
+\begin{enumerate}
+    \item \textbf{Robuste Schätzung (Update):} In jedem Frame $k$ wird mittels RANSAC aus den $N_k$ verrauschten Feature-Matches eine ungefilterte Homographie-Matrix $H_{raw, k}$ berechnet.
+    \item \textbf{Filterung:} Der Zustandsvektor des Filters besteht nun ausschließlich aus den Elementen der Matrix $H$ (bzw. deren 8 Freiheitsgraden). Die Dimension des Zustandsvektors ist somit konstant (unabhängig von $N_k$). Die Parameter von $H_{raw, k}$ dienen als Messung $z_k$ für den Filter, woraus eine geglättete Matrix $H_{filtered, k}$ resultiert.
+    \item \textbf{Projektion (Proxy-Punkte):} Um den Fehlervektor für das IBVS-Regelgesetz zu bilden, wird die feste Menge der $M$ ursprünglich definierten Soll-Features $p_{ref}^*$ (die \textit{Desired Features}) mittels der geglätteten Homographie $H_{filtered, k}$ in das aktuelle Bild projiziert.
+\end{enumerate}
+
+Dieser Ansatz entkoppelt die stochastische Natur des Feature-Matchers (verschwindende Punkte, variierende Ausreißer-Raten) von der mathematischen Striktheit des Zustandsfilters und garantiert ein glattes Steuersignal konstanter Dimension für den Regler.
+
+
+
+
+
+\section{Implementierung des Standard Kalman Filters (SKF) im IBVS-Kontext}
+\label{sec:skf_implementation}
+
+Die Anwendung eines Standard Kalman Filters (SKF) auf visuelle Servoing-Aufgaben bringt zwei fundamentale Herausforderungen mit sich: die Nichtlinearität der Projektionskinematik und die zeitlich variierende Dimension des Messvektors bei Feature-basierten Ansätzen.
+
+
+
+
+\subsection{Nichtlinearität der Bildraum-Kinematik}
+Der SKF setzt ein lineares Systemmodell ($x_{k} = F x_{k-1} + B u_k$) voraus. Die Transformation von 3D-Kamerageschwindigkeiten (Twist) $v_c = [v_x, v_y, v_z, \omega_x, \omega_y, \omega_z]^T$ in 2D-Pixelgeschwindigkeiten $\dot{p} = [\dot{u}, \dot{v}]^T$ wird durch die Interaktionsmatrix $L_s$ beschrieben. Wie in den Grundlagen zum IBVS gezeigt, enthält diese Matrix Terme wie $u^2$, $v^2$ und $uv$. 
+Selbst bei der Annahme einer konstanten und bekannten Tiefe $Z$ verbleibt das System aufgrund der Rotationskomponenten hochgradig nichtlinear. Eine exakte physikalische Modellierung der Roboterkinematik ist im SKF daher unmöglich. 
+Als Kompromiss und Baseline für spätere nichtlineare Filter wird für den SKF ein entkoppeltes, rein kinematisches 2D-Constant-Velocity (CV) Modell im Bildraum angenommen. Der Steuerbefehl des Roboters ($u_k$) wird dabei vernachlässigt.
+
+
+
+
+\subsection{Das Konzept der Virtuellen Proxy-Punkte}
+Um das Problem der variierenden Anzahl an Keypoints $N_k$ zu umgehen (welches eine konstante Dimension des Zustandsvektors verhindert), wird ein indirekter Filteransatz gewählt. 
+
+Anstatt die $N_k$ variablen Keypoints oder die 9 physikalisch schwer interpretierbaren Parameter der Homographie-Matrix $H$ direkt zu filtern, nutzt der SKF vier feste, künstliche \textit{virtuelle Proxy-Punkte} (z.~B. die vier Bildecken). 
+Der Zustandsvektor $x \in \mathbb{R}^{16}$ umfasst die 2D-Positionen und 2D-Geschwindigkeiten dieser vier Punkte:
+\begin{equation}
+    x = [u_1, v_1, u_2, v_2, u_3, v_3, u_4, v_4, \dot{u}_1, \dot{v}_1, \dot{u}_2, \dot{v}_2, \dot{u}_3, \dot{v}_3, \dot{u}_4, \dot{v}_4]^T
+\end{equation}
+
+Der Update-Zyklus verläuft wie folgt:
+\begin{enumerate}
+    \item \textbf{Messungsgenerierung:} Aus den $N_k$ Roh-Matches des Detektors (z.~B. \textit{xfeat}) wird eine ungefilterte Homographie $H_{raw}$ berechnet. Die vier virtuellen Referenzpunkte werden mit $H_{raw}$ projiziert. Das Ergebnis bildet den Messvektor $z_k \in \mathbb{R}^8$.
+    \item \textbf{Filterung:} Der SKF filtert diese vier projizierten Punkte unter Annahme des 2D-CV-Modells.
+    \item \textbf{Rücktransformation:} Aus den vier \textit{gefilterten} Positionen im Zustandsvektor wird eine neue, bereinigte Homographie $H_{filtered}$ berechnet. Mit dieser werden schlussendlich die $M$ Ziel-Features für den IBVS-Regler projiziert.
+\end{enumerate}
+Dieser Ansatz garantiert einen konstanten, niedrigdimensionalen Zustandsraum und eine physikalisch sinnvolle Parametrisierung des Prozessrauschens $Q$ auf den Pixelgeschwindigkeiten.
+
+
+
+
+
+\section{Der Image-Space Extended Kalman Filter (EKF)}
+\label{sec:image_space_ekf}
+
+Um das Divergenz- und Drift-Problem des SKF zu lösen, muss die Steuerungskinematik des Roboters in das Prädiktionsmodell integriert werden. Anstatt die 6-DoF 3D-Pose der Kamera als Zustand zu definieren, was eine fehleranfällige Rückprojektion der 2D-Features erfordern würde, wählt man in IBVS-Architekturen häufig den \textit{Image-Space EKF} (Feature-based EKF).
+
+Der Zustandsvektor $x \in \mathbb{R}^8$ beinhaltet weiterhin ausschließlich die 2D-Pixelkoordinaten der 4 virtuellen Proxy-Punkte. Die Nichtlinearität wird in das Systemmodell (Prädiktion) verlagert.
+
+
+
+
+\subsection{Nichtlineare Prädiktion mittels Interaktionsmatrix}
+Das Systemmodell $f(x, u)$ nutzt den bekannten 3D-Geschwindigkeits-Twist der Kamera $v_{cam}$ als Eingangsgröße $u_k$. Die resultierende Pixelgeschwindigkeit $\dot{s}$ der Proxy-Punkte wird über die Bild-Jacobi-Matrix (Interaktionsmatrix) $L_s(x, Z)$ berechnet:
+\begin{equation}
+    \dot{s} = L_s(x, Z) \cdot v_{cam}
+\end{equation}
+Die nichtlineare Zustandsprädiktion erfolgt durch zeitliche Integration:
+\begin{equation}
+    x_{k|k-1} = x_{k-1|k-1} + \dot{s} \cdot \Delta t
+\end{equation}
+
+Da $f(x,u)$ nichtlinear in $x$ ist, muss die System-Kovarianzmatrix $P$ über die Taylor-Linearisierung 1. Ordnung aktualisiert werden:
+\begin{equation}
+    P_{k|k-1} = F_k P_{k-1|k-1} F_k^T + Q
+\end{equation}
+Wobei $F_k = \frac{\partial f}{\partial x}$ die System-Jacobi-Matrix ist. In der Praxis wird $F_k$ oft numerisch mittels zentraler Differenzen approximiert, um die komplexe analytische Ableitung der Interaktionsmatrix zu umgehen.
+
+
+
+
+\subsection{Lineares Mess-Update}
+Da der Zustandsvektor $x$ bereits direkt die projizierten 2D-Pixelkoordinaten enthält und die Messung $z_k$ ebenfalls aus diesen 2D-Koordinaten (gewonnen über die Homographie $H_{raw}$) besteht, ist das Messmodell $h(x) = x$ streng linear.
+Folglich vereinfacht sich die Mess-Jacobi-Matrix $H_k$ zur Einheitsmatrix $I_{8 \times 8}$. Der Update-Schritt des EKF entspricht somit exakt dem des SKF, profitiert jedoch von einer drastisch verbesserten Prädiktion und erlaubt dadurch ein wesentlich aggressiveres Tuning (kleineres $Q$).
+
+
+
+
+\subsection{Wissenschaftliche Begründung des Image-Space EKF}
+Die Entscheidung, den Zustandsvektor im 2D-Bildraum zu belassen und die Nichtlinearität der Projektion über die Interaktionsmatrix $L_s$ in das Systemmodell (Prädiktion) zu integrieren, ist in der Literatur als \textit{Feature-based Tracking} oder \textit{Image-Space Filtering} etabliert. 
+
+Dieser Ansatz bietet gegenüber der 3D-Posenschätzung signifikante Stabilitätsvorteile, da die Rückprojektion von verrauschten 2D-Pixeln in den 3D-Raum ein schlecht gestelltes Problem (ill-posed problem) darstellt, welches stark von Kalibrierfehlern beeinflusst wird~\cite{comport2006real}. 
+
+Durch die direkte Nutzung des Roboter-Twists $v_{cam}$ als Steuergröße $u_k$ und der Interaktionsmatrix als Systemfunktion~\cite{chaumette2006visual} wird die Steuerungskinematik des Roboters exakt abgebildet. Dies eliminiert den Filter-Lag (Verzögerung) bei plötzlichen Beschleunigungen, welcher bei naiven Constant-Velocity-Modellen unweigerlich auftritt~\cite{corke1996dynamic}. Der EKF agiert in dieser Architektur prädiktiv, wodurch das Mahalanobis-Gating wesentlich engere Toleranzgrenzen (kleineres Messrauschen $R$) zulässt und die Robustheit gegen Ausreißer (False Matches) drastisch steigt.
+
+
+
+
+
+\section{Stabilität und Singularitätsvermeidung im IBVS}
+\label{sec:singularities}
+
+Bei der Ausführung von Visual-Servoing-Aufgaben im geschlossenen Regelkreis (Closed-Loop) können sowohl auf Sensor- als auch auf Aktorebene mathematische Singularitäten auftreten, die ohne Schutzmechanismen zur Divergenz des Filters oder zu extremen Gelenkgeschwindigkeiten führen.
+
+
+
+
+\subsection{Vermeidung von Homographie-Singularitäten (Fluchtlinie)}
+Die Verwendung der äußersten Bildecken als virtuelle Proxy-Punkte für den Zustandsfilter birgt das Risiko perspektivischer Singularitäten. Bei starken Kamerarotationen (Pitch/Yaw) relativ zur planaren Szene kann die Bildebene die Fluchtlinie (Vanishing Line) der projizierten Ebene kreuzen. 
+Punkte, die exakt auf oder jenseits der Fluchtlinie liegen, werden durch die Homographie-Gleichung auf Unendlich abgebildet, was den Filterzustand augenblicklich destabilisiert. 
+Die Lösung besteht darin, die virtuellen Proxy-Punkte räumlich zu konzentrieren (z.~B. als verkleinertes Rechteck im Bildzentrum). Dadurch wird die Wahrscheinlichkeit, dass die Proxy-Punkte bei extremen Betrachtungswinkeln die Fluchtlinie kreuzen, drastisch minimiert.
+
+
+
+
+\subsection{Aktor-Singularitäten und Damped Least Squares (DLS)}
+Der IBVS-Regler berechnet den erforderlichen Kamera-Twist $v_{cam}$, welcher anschließend über die inverse Roboter-Jacobi-Matrix $J^{-1}$ in Gelenkgeschwindigkeiten $\dot{q}$ transformiert wird. Nähert sich der Roboter einer kinematischen Singularität (z.~B. Armstreckung), verliert die Matrix $J$ ihren vollen Rang, und die Werte der Standard-Pseudoinversen $J^+$ divergieren gegen Unendlich.
+
+Um die resultierenden unkontrollierbaren Gelenkgeschwindigkeiten zu unterdrücken, wird die Standard-Pseudoinverse durch die \textit{Damped Least Squares} (DLS) Methode (auch Levenberg-Marquardt-Verfahren) substituiert \cite{wampler1986manipulator}. Hierbei wird ein Dämpfungsfaktor $\lambda_{damp}$ eingeführt:
+\begin{equation}
+    J_{dls}^+ = J^T \left( J J^T + \lambda_{damp}^2 I \right)^{-1}
+\end{equation}
+Die DLS-Invertierung garantiert eine obere Schranke für die berechneten Geschwindigkeiten auf Kosten einer minimalen, kontrollierbaren Abweichung in der exakten Trajektorienverfolgung in der Nähe von Singularitäten. Analog wird DLS auch bei der Invertierung der Bild-Interaktionsmatrix $L_s$ eingesetzt.
+
+
+
+
+
 \section{Literatur}
 \begin{itemize}
     \item KF und EKF: \begin{itemize}
-        \item Das Original-Paper von Kalman, in dem der Filter erstmals vorgestellt wurde \cite{kalman1960new}.
-        \item Das beste Tutorial für den Einstieg, Pflichtlektüre \cite{welch2006introduction}.
-        \item Das absolute Standardwerk als Buch. Kapitel 3 behandelt KF, EKF und UKF extrem detailliert \cite{thrun2005probabilistic}.
+        \item Das Original-Paper von Kalman, in dem der Filter erstmals vorgestellt wurde~\cite{kalman1960new}.
+        \item Das beste Tutorial für den Einstieg, Pflichtlektüre~\cite{welch2006introduction}.
+        \item Das absolute Standardwerk als Buch. Kapitel 3 behandelt KF, EKF und UKF extrem detailliert~\cite{thrun2005probabilistic}.
     \end{itemize}
     \item UKF: \begin{itemize}
-        \item Das Original-Paper zur Unscented Transform \cite{julier1997new}.
+        \item Das Original-Paper zur Unscented Transform~\cite{julier1997new}.
     \end{itemize}
     \item ESKF: \begin{itemize}
-        \item Das Standardwerk für den ESKF, insbesondere im Kontext von IMU-gestützter Navigation \cite{forster2017manifold}.
-        \item Dies ist das wichtigste Paper für dich, wenn du den ESKF mit Quaternionen implementieren willst. Es erklärt die Kettenregel und Matrizen Schritt für Schritt \cite{sola2017quaternion}.
+        \item Das Standardwerk für den ESKF, insbesondere im Kontext von IMU-gestützter Navigation~\cite{forster2017manifold}.
+        \item Dies ist das wichtigste Paper für dich, wenn du den ESKF mit Quaternionen implementieren willst. Es erklärt die Kettenregel und Matrizen Schritt für Schritt~\cite{sola2017quaternion}.
     \end{itemize}
     \item Quaternionen und 3D-Rotationen: \begin{itemize}
-        \item Das Standardwerk für Quaternionen, insbesondere die Kapitel über Kinematik und Fehlerzustände \cite{kuipers1999quaternions}.
-        \item Kapitel über Kalman-Filter und 3D-Rotationen, mit vielen praktischen Beispielen \cite{corke2017robotics}.
+        \item Das Standardwerk für Quaternionen, insbesondere die Kapitel über Kinematik und Fehlerzustände~\cite{kuipers1999quaternions}.
+        \item Kapitel über Kalman-Filter und 3D-Rotationen, mit vielen praktischen Beispielen~\cite{corke2017robotics}.
     \end{itemize}
     \item IBVS: \begin{itemize}
-        \item Das Standardwerk für IBVS, um den Gesamtkontext deines Projekts wissenschaftlich zu belegen \cite{chaumette2006visual}.
+        \item Das Standardwerk für IBVS, um den Gesamtkontext deines Projekts wissenschaftlich zu belegen~\cite{chaumette2006visual}.
     \end{itemize}
     \item 1\euro{} Filter: \begin{itemize}
-        \item Das Original-Paper, das die Idee des adaptiven Tiefpassfilters vorstellt \cite{casiez20121euro}.
+        \item Das Original-Paper, das die Idee des adaptiven Tiefpassfilters vorstellt~\cite{casiez20121euro}.
+    \end{itemize}
+    \item Image-Space EKF: \begin{itemize}
+        \item Dieses Paper etablierte die Nutzung von Interaktionsmatrizen für das Tracking und Filtern~\cite{comport2006real}.
+        \item Das Standardwerk für die Herleitung der Interaktionsmatrix $L_s$, die im Prädiktionsschritt genutzt wird~\cite{chaumette2006visual}.
+        \item Analysiert die Latenzen in IBVS-Systemen und begründet die Notwendigkeit kinematischer Vorsteuerung im Filter~\cite{corke1996dynamic}.
     \end{itemize}
 \end{itemize}
 

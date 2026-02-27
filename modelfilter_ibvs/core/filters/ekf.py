@@ -1,200 +1,139 @@
+# modelfilter_ibvs/core/filters/ekf.py
 import numpy as np
-import cv2
 from .base import BaseFilter
+from modelfilter_ibvs.core.ibvs import IBVSController # Für die Interaktionsmatrix
 
 class ExtendedKalmanFilter(BaseFilter):
     def __init__(self, K):
         super().__init__(K)
-        self.K_inv = np.linalg.inv(K)
+        self.ibvs_math = IBVSController(K)
         
-        # Zustand x ist die flachgedrückte Homographie-Matrix (9x1 Vektor)
-        # Ordnung 'F' (Fortran/Column-major): [h11, h21, h31, h12, h22, h32, h13, h23, h33]^T
-        self.x = np.zeros((9, 1))
-        self.P = np.eye(9) * 0.01
-        
-        # Standard-Parameter
-        self.Q_scalar = 0.01
-        self.R_scalar = 0.005 # Messrauschen in normalisierten Koordinaten (sehr klein!)
-        self.gate_threshold = 20
-        
-        # Modell-Annahmen für Prediction
-        self.n_star = np.array([0, 0, 1])
-        
-    def set_Q_R(self, q_val, r_val, gate_threshold):
-        self.Q_scalar = q_val
-        self.R_scalar = r_val
-        self.gate_threshold = gate_threshold
-        print(f"[EKF] Parameter aktualisiert: Q={q_val}, R={r_val}, Gate={gate_threshold}")
-        
-    def reset(self):
-        super().reset()
-        self.x = np.zeros((9, 1))
-        self.P = np.eye(9) * 0.01
-        self.status = "INIT"
-        self.initialized = False
-        
-    def pixel2norm(self, uv):
-        num = uv.shape[1]
-        uv_hom = np.vstack((uv, np.ones((1, num))))
-        return self.K_inv @ uv_hom
+        # Zustand x ist nun 8D! (Nur noch die Positionen, KEINE Geschwindigkeiten mehr)
+        # Die Geschwindigkeit wird ja durch v_ee deterministisch berechnet!
+        self.x = np.zeros((8, 1))
+        self.P = np.eye(8) * 1000.0
 
-    def initialize(self, current_pixels, desired_pixels):
-        # Für die allererste Schätzung nutzen wir OpenCV (DLT Algorithmus)
-        p_curr = self.pixel2norm(current_pixels)
-        p_des = self.pixel2norm(desired_pixels)
-        
-        src = p_curr[:2, :].T
-        dst = p_des[:2, :].T
-        
-        H_meas, _ = cv2.findHomography(dst, src)
-        
-        if H_meas is not None:
-            det = np.linalg.det(H_meas)
-            if det > 0:
-                H_meas = H_meas / np.cbrt(det)
-                
-            self.x = H_meas.flatten('F').reshape(9, 1)
-            self.P = np.eye(9) * 0.01
-            self.initialized = True
-            print("[EKF] Initialisiert!")
+        # H ist nun einfach die Einheitsmatrix (da Messung und Zustand gleich sind)
+        self.H = np.eye(8) # Mess-Jacobi ist I
 
-    def predict(self, v_cam, d_star, dt):
-        """Lineare Prädiktion (Motion Model) - Identisch zum SKF"""
-        if not self.initialized: return
+        # Tuning Parameter
+        self.Q = np.eye(8) * 1.0  # Q kann jetzt viel kleiner sein als im SKF!
+        self.R = np.eye(8) * 50.0
+        self.gate_thresh = 20.0
+
+    def set_Q_R_gate(self, q_val, r_val, gate_thresh_val):
+        self.Q = np.eye(8) * q_val
+        self.R = np.eye(8) * r_val
+        self.gate_thresh = gate_thresh_val
+    
+    def force_relocalization(self):
+        super().force_relocalization()
+        # Setze die Unsicherheit wieder hoch, da wir quasi von vorne anfangen
+        self.P = np.eye(8) * 1000.0
+
+    def _transform_twist_ee_to_cam(self, v_ee):
+        """Transformiert den Twist vom Endeffektor- ins Kamerakoordinatensystem"""
+        # In robot_sim.py: T_ee_cam = SE3(0, 0, 0) * SE3.Rz(np.pi)
+        # Drehung um 180 Grad um Z bedeutet: x' = -x, y' = -y, z' = z
+        v_cam = np.zeros(6)
+        v_cam[0] = -v_ee[0] # vx
+        v_cam[1] = -v_ee[1] # vy
+        v_cam[2] =  v_ee[2] # vz
+        v_cam[3] = -v_ee[3] # wx
+        v_cam[4] = -v_ee[4] # wy
+        v_cam[5] =  v_ee[5] # wz
+        return v_cam
+
+    def _compute_pixel_velocities(self, state_8d, v_cam, Z_est):
+        """Berechnet s_dot aus Zustand x und Twist v_cam"""
+        s_dot = np.zeros((8, 1))
+        # Wandle 8D Vektor in 2x4 Matrix für die IBVS Math
+        pts_pixel = state_8d.reshape(4, 2).T
+        pts_norm = self.ibvs_math.pixel2normalized(pts_pixel)
         
-        v = v_cam[:3]; w = v_cam[3:]
-        w_x = np.array([[0, -w[2], w[1]], [w[2], 0, -w[0]], [-w[1], w[0], 0]])
+        for i in range(4):
+            x_n = pts_norm[0, i]
+            y_n = pts_norm[1, i]
+            L_s = self.ibvs_math.get_interaction_matrix_point(x_n, y_n, Z_est)
+            # L_s ist 2x6, v_cam ist 6x1 -> s_dot_i ist 2x1 (in normalisierten Koordinaten)
+            s_dot_norm = L_s @ v_cam
+            # Zurück in Pixelgeschwindigkeit umrechnen (mit Brennweiten f_x, f_y)
+            s_dot[i*2, 0] = s_dot_norm[0] * self.K[0, 0]
+            s_dot[i*2+1, 0] = s_dot_norm[1] * self.K[1, 1]
+            
+        return s_dot
+
+    def predict(self, v_ee, Z_est, dt):
+        if not self.initialized:
+            return
+
+        # 1. Kinematik umrechnen
+        v_cam = self._transform_twist_ee_to_cam(v_ee)
         
-        n_vec = self.n_star.reshape(3, 1)
-        v_vec = v.reshape(3, 1)
-        T_v = (1.0 / d_star) * (v_vec @ n_vec.T)
+        # WICHTIG: Den alten Zustand einfrieren, bevor wir irgendetwas berechnen!
+        x_old = self.x.copy()
         
-        A = w_x + T_v
+        # 2. Pixelgeschwindigkeit am ALTEN Zustand berechnen
+        s_dot = self._compute_pixel_velocities(x_old, v_cam, Z_est)
         
-        F_3 = np.eye(3) - A * dt
-        F_9 = np.kron(np.eye(3), F_3)
+        # 3. Numerische Jacobi-Matrix F_k berechnen (ebenfalls am ALTEN Zustand!)
+        F_k = np.eye(8)
+        epsilon = 1e-4
         
-        Q = np.eye(9) * self.Q_scalar
-        
-        self.x = F_9 @ self.x
-        self.P = F_9 @ self.P @ F_9.T + Q
+        for i in range(8):
+            x_plus = x_old.copy() # Richtig: Ausgehend vom alten Zustand!
+            x_plus[i, 0] += epsilon
+            
+            s_dot_plus = self._compute_pixel_velocities(x_plus, v_cam, Z_est)
+            
+            # Numerische Ableitung: Änderung der Geschwindigkeit bezogen auf epsilon
+            diff = (s_dot_plus - s_dot) / epsilon
+            F_k[:, i] += diff[:, 0] * dt
+
+        # 4. Zustand aktualisieren (Prädiktion ausführen)
+        self.x = x_old + s_dot * dt
+
+        # 5. Kovarianz-Update
+        self.P = F_k @ self.P @ F_k.T + self.Q
         self.status = "PREDICT"
 
     def update(self, current_pixels, desired_pixels):
-        """NICHT-lineares Update mit den rohen Keypoint-Koordinaten"""
-        if not self.initialized: 
-            self.initialize(current_pixels, desired_pixels)
+        # 1. Messung über Base-Class generieren
+        z_k, H_raw, self.status = self._get_raw_measurement(current_pixels, desired_pixels)
+        
+        if z_k is None:
             return
-        
-        if current_pixels is None or desired_pixels is None:
-            self.status = "MISSING"
+
+        # 2. Initialisierung / Relokalisation abfangen
+        if not self.initialized:
+            self.x = z_k
+            self.initialized = True
+            self._check_geometry_and_update_H(self.x)
+            self.status = "INIT"
             return
+
+        # 3. Kalman Update
+        y = z_k - self.x
+        S = self.P + self.R
         
-        num_points = current_pixels.shape[1]
-        if num_points < 4: return # Zu wenig Punkte für sinnvolles Update
-        
-        # 1. Alles in normalisierte Koordinaten wandeln
-        p_curr = self.pixel2norm(current_pixels)
-        p_des = self.pixel2norm(desired_pixels)
-        
-        # 2. Reale Messung z formattieren: [u1, v1, u2, v2, ...]^T
-        z = p_curr[:2, :].T.flatten().reshape(-1, 1)
-        
-        # 3. Vorhersage der Messung (z_hat) und Berechnung der Jacobi-Matrix (C)
-        H_est = self.x.reshape(3, 3, order='F')
-        
-        # Projiziere die Soll-Punkte mit unserem aktuellen Zustand H
-        p_proj = H_est @ p_des
-        
-        C_list = []
-        z_hat_list = []
-        
-        for i in range(num_points):
-            x_i = p_des[0, i]
-            y_i = p_des[1, i]
-            
-            # Nenner der perspektivischen Division
-            D = p_proj[2, i] 
-            
-            # Verhindere Division durch Null
-            if abs(D) < 1e-6: D = 1e-6 
-            
-            u_hat = p_proj[0, i] / D
-            v_hat = p_proj[1, i] / D
-            z_hat_list.extend([u_hat, v_hat])
-            
-            # --- Analytische Jacobi-Matrix (Partielle Ableitungen) ---
-            # Ableitungen nach x = [h11, h21, h31, h12, h22, h32, h13, h23, h33]
-            du_dx = np.array([
-                x_i/D, 0, -u_hat*x_i/D, 
-                y_i/D, 0, -u_hat*y_i/D, 
-                1/D,   0, -u_hat/D
-            ])
-            
-            dv_dx = np.array([
-                0, x_i/D, -v_hat*x_i/D, 
-                0, y_i/D, -v_hat*y_i/D, 
-                0, 1/D,   -v_hat/D
-            ])
-            
-            C_list.append(du_dx)
-            C_list.append(dv_dx)
-            
-        z_hat = np.array(z_hat_list).reshape(-1, 1)
-        C = np.vstack(C_list) # Matrix der Größe (2N x 9)
-        
-        # 4. Kalman Filter Mathematik
-        # Innovation (Fehler zwischen Messung und Prädiktion)
-        y = z - z_hat
-        
-        # Messrauschen Matrix R (2N x 2N)
-        R = np.eye(2 * num_points) * self.R_scalar
-        
-        # Innovationskovarianz S
-        S = C @ self.P @ C.T + R
-        
-        # Kalman Gain K = P * C^T * S^-1
-        # (Bei sehr vielen Keypoints kann die Inversion von S teuer werden. 
-        # Da wir auf 50 Matches limitiert haben, ist max_size 100x100 -> Numpy macht das in Millisekunden)
         try:
             S_inv = np.linalg.inv(S)
-            mahalanobis = y.T @ S_inv @ y
-            
-            # GATING CHECK
-            if mahalanobis > self.gate_threshold:
-                self.status = "REJECT (GLARE)"
-                # Wir ignorieren die Messung (kein Update von x und P)
+            mahalanobis_dist = y.T @ S_inv @ y
+            if mahalanobis_dist > self.gate_thresh:
+                self.status = "REJECT (OUTLIER)"
+                self._check_geometry_and_update_H(self.x)
                 return
         except np.linalg.LinAlgError:
-            print("[EKF] Singularität in S-Matrix erkannt! Überspringe Update.")
+            self.status = "REJECT (SINGULAR)"
             return
-            
-        K_gain = self.P @ C.T @ S_inv
-        
-        # 5. Zustands- und Kovarianz-Update
-        self.x = self.x + K_gain @ y
-        
-        # P = (I - K*C) * P
-        I = np.eye(9)
-        self.P = (I - K_gain @ C) @ self.P
-        
-        # 6. SL(3) Normalisierung (H_33 muss Determinante 1 behalten)
-        H_temp = self.x.reshape(3, 3, order='F')
-        det = np.linalg.det(H_temp)
-        if det > 0:
-            self.x = (H_temp / np.cbrt(det)).flatten('F').reshape(9, 1)
-        self.status = "UPDATE"
 
-    def get_projected_points(self, desired_pixels):
-        if not self.initialized: return desired_pixels
+        K = self.P @ S_inv
+        x_new = self.x + K @ y
         
-        H_est = self.x.reshape(3, 3, order='F')
-        
-        p_des_norm = self.pixel2norm(desired_pixels)
-        p_curr_est_norm = H_est @ p_des_norm
-        p_curr_pixel_hom = self.K @ p_curr_est_norm
-        
-        u = p_curr_pixel_hom[0, :] / p_curr_pixel_hom[2, :]
-        v = p_curr_pixel_hom[1, :] / p_curr_pixel_hom[2, :]
-        
-        return np.vstack((u, v))
+        # 4. Geometrie checken, bevor wir den Zustand endgültig übernehmen
+        if self._check_geometry_and_update_H(x_new):
+            self.x = x_new
+            self.P = (np.eye(8) - K) @ self.P
+            self.status = "UPDATE"
+        else:
+            self.status = "REJECT (GEOMETRY)"
