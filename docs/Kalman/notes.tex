@@ -705,6 +705,105 @@ Die DLS-Invertierung garantiert eine obere Schranke für die berechneten Geschwi
 
 
 
+\section{Der Unscented Kalman Filter (UKF) im Visual Servoing}
+\label{sec:ukf}
+
+Obwohl der EKF durch die Bild-Jacobi-Matrix eine performante Lösung bietet, unterliegt er den fundamentalen Limitierungen der Linearisierung erster Ordnung. Der Unscented Kalman Filter (UKF) umgeht die explizite Berechnung von Ableitungen (Jacobi-Matrizen), indem er die Wahrscheinlichkeitsverteilung des Zustands deterministisch durch eine minimale Menge an Sigma-Punkten approximiert (Unscented Transform, UT) \cite{julier1997new}.
+
+
+
+
+\subsection{Semi-Nichtlineare Architektur für IBVS}
+Im Kontext des Image-Space Trackings mit virtuellen Proxy-Punkten liegt eine Besonderheit vor: Das Prädiktionsmodell $f(x, u)$ (Integration der Interaktionsmatrix $L_s$) ist hochgradig nichtlinear, das Messmodell $h(x) = x$ (direkte Beobachtung der projizierten Punkte) ist jedoch streng linear. 
+Anstatt den rechenintensiven vollen UKF zu implementieren, wird hier ein \textit{semi-nichtlinearer UKF} \cite{wan2000unscented} angewandt. 
+Die Unscented Transform wird ausschließlich für die Zustandsprädiktion genutzt. Für einen Zustandsvektor der Dimension $L=8$ werden $2L+1 = 17$ Sigma-Punkte generiert, durch das kinematische Modell propagiert und anschließend zu Mittelwert $x_{k|k-1}$ und Kovarianz $P_{k|k-1}$ rekonstruiert. 
+Da $H = I_{8 \times 8}$ gilt, erfolgt der Update-Schritt identisch zum Standard Kalman Filter mit minimalem numerischen Aufwand.
+
+
+
+
+\subsection{Numerische Stabilität und Cholesky-Zerlegung}
+Die Generierung der Sigma-Punkte erfordert die Berechnung der Matrixwurzel der Fehlerkovarianzmatrix $P$, typischerweise mittels der Cholesky-Zerlegung $P = L_{chol} L_{chol}^T$. In der praktischen (Python-)Implementierung führen Fließkomma-Rundungsfehler bei sequenziellen Matrixoperationen unweigerlich zu Asymmetrien oder dem Verlust der positiven Definitheit von $P$.
+Um einen Zusammenbruch des Filters (\textit{Cholesky-Crash}) zu verhindern, muss $P$ vor jedem Prädiktionsschritt zwingend symmetrisiert und regularisiert werden:
+\begin{equation}
+    P_{safe} = \frac{P + P^T}{2} + \epsilon I
+\end{equation}
+wobei $\epsilon$ ein kleiner Konditionierungsfaktor (z.~B. $10^{-8}$) ist, der die strikte positive Definitheit garantiert. Zudem werden die UT-Skalierungsparameter konservativ gewählt ($\alpha = 10^{-3}$), um eine zu weite Streuung der Sigma-Punkte (welche zu degenerierten Proxy-Polygonen führen könnte) zu unterdrücken.
+
+
+
+
+
+\section{Der Error-State Kalman Filter (ESKF) als indirekter Filter}
+\label{sec:eskf}
+
+Der Error-State Kalman Filter (ESKF) ist die Standardarchitektur in modernen Sensorfusions-Systemen (wie VIO/SLAM), um Zustände auf nicht-euklidischen Mannigfaltigkeiten (z.~B. $SO(3)$ für Rotationen) konfliktfrei zu filtern \cite{sola2017quaternion}. 
+
+Obwohl der Zustandsraum des Image-Space Trackings ($\mathbb{R}^8$ für 4 Proxy-Punkte) rein euklidisch ist und keine Mannigfaltigkeits-Beschränkungen aufweist – wodurch der ESKF mathematisch äquivalent zu einem klassischen EKF (bzw. Indirect Kalman Filter) wird –, bietet die ESKF-Architektur strukturelle und numerische Vorteile durch die strikte Entkopplung von hochfrequenter Kinematik und niederfrequenter Sensorkorrektur.
+
+
+
+
+\subsection{Zustandsaufteilung: Nominal- und Fehlerzustand}
+Der wahre Zustand $x_t$ wird in einen Nominalzustand $x_{nom}$ (groß, nichtlinear, deterministisch) und einen Fehlerzustand $\delta x$ (klein, linear, stochastisch) aufgeteilt:
+\begin{equation}
+    x_t = x_{nom} + \delta x
+\end{equation}
+
+
+
+
+\subsection{Die drei Phasen des ESKF}
+Der Filterzyklus gliedert sich in drei dedizierte Phasen:
+\begin{enumerate}
+    \item \textbf{Nominale Prädiktion:} Der Nominalzustand wird durch das nichtlineare kinematische Modell (die Bild-Jacobi-Matrix $L_s$) vorwärts integriert. Störgrößen und Rauschen werden hierbei ignoriert.
+    \begin{equation}
+        x_{nom, k} = x_{nom, k-1} + L_s(x_{nom, k-1}, Z) \cdot v_{cam} \Delta t
+    \end{equation}
+    \item \textbf{Fehler-Filterung (Predict \& Update):} Der Kalman-Filter schätzt ausschließlich den Fehlerzustand $\delta x$. Da das erwartete Mittel des Fehlers vor der Sensormessung null ist, besteht die Prädiktion lediglich aus der Propagation der Kovarianzmatrix $P$:
+    \begin{equation}
+        P_k = F_{\delta x} P_{k-1} F_{\delta x}^T + Q
+    \end{equation}
+    Das Messresiduum ergibt sich aus der Differenz zwischen Sensor-Homographie und Nominalzustand ($y = z_k - x_{nom, k}$). Über den Kalman-Gain $K$ wird der Fehler $\delta x$ aktualisiert.
+    \item \textbf{Injektion und Reset:} Der geschätzte Fehler wird in den Nominalzustand injiziert ($x_{nom} \leftarrow x_{nom} + \delta x$). Anschließend muss der Fehlerzustand im Filter zwingend zurückgesetzt werden ($\delta x \leftarrow 0$), um eine Mehrfachakkumulation im Folgeschritt zu verhindern.
+\end{enumerate}
+
+
+
+
+
+\section{Benchmarking-Methodik und Evaluierungsmetriken}
+\label{sec:benchmarking}
+
+Um die Leistungsfähigkeit der implementierten Filterarchitekturen (1-Euro, SKF, EKF, UKF, ESKF) im geschlossenen Regelkreis objektiv zu quantifizieren, wird eine automatisierte Benchmarking-Umgebung (Wrapper) definiert. Diese ermöglicht reproduzierbare Testläufe unter kontrollierten Störgrößen (Rauschen, Verdeckungen) und isolierten kinematischen Szenarien.
+
+\subsection{Test-Szenarien}
+Die Evaluierung erfolgt anhand kanonischer Start- und Zielposen ($T_{start}$, $T_{target}$), um spezifische Eigenschaften der Bild-Jacobi-Matrix $L_s$ zu isolieren:
+\begin{itemize}
+    \item \textbf{Reine Translation:} Versatz parallel zur Bildebene (X/Y-Achse), um das grundlegende Konvergenzverhalten zu prüfen.
+    \item \textbf{Reine Rotation:} Verdrehung der Kamera um die optische Achse (Z-Achse), um die Kreuzkopplungen in $L_s$ zu testen.
+    \item \textbf{Tiefenvariation (Z-Achse):} Annäherung an das Objekt, um die Nichtlinearität der perspektivischen Skalierung zu evaluieren.
+    \item \textbf{Gekoppelte 6-DoF-Bewegung:} Ein Stresstest mit simultaner Translation und Rotation nahe der perspektivischen Fluchtlinie.
+\end{itemize}
+
+\subsection{Evaluierungsmetriken}
+Während der Testläufe werden in jedem Frame $k$ folgende Metriken aufgezeichnet:
+\begin{enumerate}
+    \item \textbf{Feature Error (RMSE):} Die Wurzel der mittleren quadratischen Abweichung zwischen den aktuell projizierten Features $s_k$ und den Soll-Features $s^*$. Diese Metrik beschreibt die Konvergenzgeschwindigkeit und Präzision im Bildraum.
+    \begin{equation}
+        \text{RMSE}_k = \sqrt{\frac{1}{N} \sum_{i=1}^{N} ||s_{i,k} - s_{i}^*||^2}
+    \end{equation}
+    \item \textbf{Control Effort (Laufruhe):} Das Integral der quadratischen Stellgrößen normiert über die Zeit. In der industriellen Praxis ist ein glattes Steuersignal essenziell, um hochfrequente Schwingungen und mechanischen Verschleiß der Robotergelenke zu minimieren. Ein effizienter Filter glättet die durch Sensorrauschen induzierten Spitzen in der Kamerageschwindigkeit $v_{cam}$.
+    \begin{equation}
+        E_{control} = \int_{0}^{T} ||v_{cam}(t)||^2 dt
+    \end{equation}
+    \item \textbf{Robustheit (Reject-Rate):} Der prozentuale Anteil der Frames, in denen das Mahalanobis-Gate die Messung als Ausreißer abweist. Dies indiziert die Toleranz des Filters gegenüber False-Positive-Matches des Feature-Detektors.
+\end{enumerate}
+
+
+
+
+
 \section{Literatur}
 \begin{itemize}
     \item KF und EKF: \begin{itemize}
