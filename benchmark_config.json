@@ -1,0 +1,88 @@
+{
+  "scenarios": [
+    {
+      "name": "01_sanity_XFeat_woFilter",
+      "extractor_name": "XFeat (CNN)",
+      "filter_name": "- (Kein Filter)",
+      "target_joints": [165.0, -90.0, 90.0, 0.0, 90.0, 0.0],
+      "start_joints": [180.0, -90.0, 90.0, 0.0, 90.0, 0.0],
+      "noise_std": 2.0,
+      "max_frames": 300,
+      "stop_error": 0.0001,
+      "blind_intervals": [
+        [10, 15],
+        [25, 30]
+      ]
+    },
+    {
+      "name": "01_sanity_XFeat_KF",
+      "extractor_name": "XFeat (CNN)",
+      "filter_name": "Standard Kalman Filter",
+      "target_joints": [165.0, -90.0, 90.0, 0.0, 90.0, 0.0],
+      "start_joints": [180.0, -90.0, 90.0, 0.0, 90.0, 0.0],
+      "noise_std": 2.0,
+      "max_frames": 300,
+      "stop_error": 0.0001,
+      "blind_intervals": [
+        [10, 15],
+        [25, 30]
+      ]
+    },
+    {
+      "name": "02_sanity_XFeat_UKF",
+      "extractor_name": "XFeat (CNN)",
+      "filter_name": "Extended Kalman Filter",
+      "target_joints": [165.0, -90.0, 90.0, 0.0, 90.0, 0.0],
+      "start_joints": [180.0, -90.0, 90.0, 0.0, 90.0, 0.0],
+      "noise_std": 2.0,
+      "max_frames": 300,
+      "stop_error": 0.0001,
+      "blind_intervals": [
+        [10, 15],
+        [25, 30]
+      ]
+    },
+    {
+      "name": "03_sanity_XFeat_UKF",
+      "extractor_name": "XFeat (CNN)",
+      "filter_name": "Unscented Kalman Filter",
+      "target_joints": [165.0, -90.0, 90.0, 0.0, 90.0, 0.0],
+      "start_joints": [180.0, -90.0, 90.0, 0.0, 90.0, 0.0],
+      "noise_std": 2.0,
+      "max_frames": 300,
+      "stop_error": 0.0001,
+      "blind_intervals": [
+        [10, 15],
+        [25, 30]
+      ]
+    },
+    {
+      "name": "04_sanity_XFeat_ESKF",
+      "extractor_name": "XFeat (CNN)",
+      "filter_name": "Error-State Kalman Filter",
+      "target_joints": [165.0, -90.0, 90.0, 0.0, 90.0, 0.0],
+      "start_joints": [180.0, -90.0, 90.0, 0.0, 90.0, 0.0],
+      "noise_std": 2.0,
+      "max_frames": 300,
+      "stop_error": 0.0001,
+      "blind_intervals": [
+        [10, 15],
+        [25, 30]
+      ]
+    },
+    {
+      "name": "05_sanity_XFeat_1Euro",
+      "extractor_name": "XFeat (CNN)",
+      "filter_name": "1-Euro Filter",
+      "target_joints": [165.0, -90.0, 90.0, 0.0, 90.0, 0.0],
+      "start_joints": [180.0, -90.0, 90.0, 0.0, 90.0, 0.0],
+      "noise_std": 2.0,
+      "max_frames": 300,
+      "stop_error": 0.0001,
+      "blind_intervals": [
+        [10, 15],
+        [25, 30]
+      ]
+      }
+  ]
+}

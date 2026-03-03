@@ -803,6 +803,16 @@ Während der Testläufe werden in jedem Frame $k$ folgende Metriken aufgezeichne
 
 
 
+\subsection{Automatisierte Testumgebung und Störgrößen-Simulation}
+Um eine objektive Vergleichbarkeit zu garantieren, werden die Evaluierungsszenarien über Konfigurationsdateien (JSON-Format) automatisiert durchlaufen. Die Testumgebung iteriert dabei über definierte Start- und Zielgelenkwinkel ($q_{start}, q_{target}$) und zeichnet die Konvergenzmetriken zeitsynchron auf.
+
+Neben dem additiven, normalverteilten Bildrauschen ($R_{true}$) wird die Robustheit der Tracking-Recovery (Relokalisation) durch simulierte Sensor-Blackouts geprüft. Hierbei wird der Feature-Detektor für ein definiertes Intervall $k \in [k_{blind\_start}, k_{blind\_end}]$ blockiert (Simulation von extremem Glare oder vollständiger Verdeckung). 
+
+Ein idealer Filter prädiziert während dieser Blindphase die Trajektorie physikalisch korrekt weiter und relokalisiert den Zustand $x$ unmittelbar nach Wiederherstellung der Sichtbarkeit, ohne dass es zu einem Divergieren des IBVS-Reglers ($v_{cam} \rightarrow \infty$) kommt. Am Ende jedes Szenarios aggregiert die Umgebung die Einzelmessungen in einer globalen Zusammenfassung, in welcher die Konvergenzdauer, das Integral des Control Efforts ($\int ||v||^2 dt$) sowie die Fehlerraten dokumentiert werden.
+
+
+
+
 
 \section{Literatur}
 \begin{itemize}
