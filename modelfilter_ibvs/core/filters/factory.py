@@ -11,8 +11,8 @@ class FilterFactory:
         "- (Kein Filter)": None,
         "Standard Kalman Filter": StandardKalmanFilter,
         "Extended Kalman Filter": ExtendedKalmanFilter,
-        "Error-State Kalman Filter": ErrorStateKalmanFilter,
         "Unscented Kalman Filter": UnscentedKalmanFilter,
+        "Error-State Kalman Filter": ErrorStateKalmanFilter,
         "1-Euro Filter": OneEuroFilter
     }
 
