@@ -10,7 +10,7 @@
 # Wichtig: Um Pfadfehler zu vermeiden, sollte dieses Skript aus dem Hauptverzeichnis des Projekts gestartet werden (dort, wo auch "sim" und "core" liegen), mit:
 # python -m modelfilter_ibvs.sim.gui_main
 ####################################################################################################
-VERSION = "1.2.2"
+VERSION = "1.3"
 
 import sys, os, cv2
 import numpy as np
@@ -21,6 +21,7 @@ from PyQt5.QtCore import Qt, QTimer
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
+import pyqtgraph as pg
 
 # Imports (Pfade anpassen wie gehabt)
 try:
@@ -91,15 +92,50 @@ class SimulatorGUI(QMainWindow):
         main_layout = QHBoxLayout(main_widget)
         
         # Layouts
-        left_layout = QVBoxLayout() # Plots
+        top_layout = QHBoxLayout() # Für Statusanzeigen
+        left_layout = QVBoxLayout() # Plots (Simulation + Graphen)
         right_layout = QVBoxLayout() # Controls
         
-        # --- Matplotlib Canvas ---
+        # --- Matplotlib Canvas (3D & Camera) ---
         self.fig = Figure(figsize=(10, 8))
         self.canvas = FigureCanvas(self.fig)
         self.ax_3d = self.fig.add_subplot(121, projection='3d')
         self.ax_cam = self.fig.add_subplot(122)
         left_layout.addWidget(self.canvas)
+        
+        # --- NEU: PyQtGraph Live Plots ---
+        bottom_plot_layout = QHBoxLayout()
+        
+        # Plot 1: RMSE Fehler
+        self.plot_widget_error = pg.PlotWidget(title="Feature Error (RMSE in Pixel)")
+        self.plot_widget_error.setLabel('left', 'Fehler', units='px')
+        self.plot_widget_error.setLabel('bottom', 'Zeit', units='Frames')
+        self.plot_widget_error.showGrid(x=True, y=True)
+        self.curve_error = self.plot_widget_error.plot(pen=pg.mkPen(color='r', width=2))
+        
+        # Plot 2: Control Effort (Geschwindigkeit)
+        self.plot_widget_vel = pg.PlotWidget(title="Control Effort (Norm v_cam)")
+        self.plot_widget_vel.setLabel('left', 'Geschw.', units='m/s')
+        self.plot_widget_vel.setLabel('bottom', 'Zeit', units='Frames')
+        self.plot_widget_vel.showGrid(x=True, y=True)
+        self.curve_vel = self.plot_widget_vel.plot(pen=pg.mkPen(color='b', width=2))
+
+        # Feste Höhe für die Plots, damit sie die Kameraansicht nicht verdrängen
+        self.plot_widget_error.setFixedHeight(220)
+        self.plot_widget_vel.setFixedHeight(220)
+
+        bottom_plot_layout.addWidget(self.plot_widget_error)
+        bottom_plot_layout.addWidget(self.plot_widget_vel)
+        
+        # Graphen unter das Matplotlib Canvas einfügen
+        left_layout.addLayout(bottom_plot_layout)
+
+        # Daten-Speicher für die Plots initialisieren
+        self.plot_data_time = []
+        self.plot_data_error = []
+        self.plot_data_vel = []
+        self.frame_counter = 0
+        # ---------------------------------
         
         # --- Controls ---
         # 1. IBVS Buttons
@@ -119,15 +155,15 @@ class SimulatorGUI(QMainWindow):
         error_layout.addWidget(self.lbl_error)
         error_layout.addWidget(QLabel("Stop Thresh.:"))
         self.sb_threshold = QDoubleSpinBox()
-        self.sb_threshold.setRange(0.0001, 10.0) # Min/Max Werte
-        self.sb_threshold.setDecimals(4)         # 4 Nachkommastellen
-        self.sb_threshold.setSingleStep(0.001)    # Schrittweite bei Pfeilklick
-        self.sb_threshold.setValue(0.001)         # Dein bisheriger Standardwert
+        self.sb_threshold.setRange(0.0001, 10.0)
+        self.sb_threshold.setDecimals(4)
+        self.sb_threshold.setSingleStep(0.001)
+        self.sb_threshold.setValue(0.001)
         error_layout.addWidget(self.sb_threshold)
         
         ibvs_layout.addWidget(self.btn_set_desired)
         ibvs_layout.addWidget(self.btn_toggle_servo)
-        ibvs_layout.addLayout(error_layout) # Dem IBVS-Block hinzufügen
+        ibvs_layout.addLayout(error_layout)
         ibvs_group.setLayout(ibvs_layout)
         right_layout.addWidget(ibvs_group)
 
@@ -148,35 +184,32 @@ class SimulatorGUI(QMainWindow):
         filter_group = QGroupBox("Filter & Noise Simulation")
         filter_layout = QVBoxLayout()
         
-        # Im Block "Filter & Noise Simulation" (Ersetze den bisherigen Button hiermit)
         filter_layout.addWidget(QLabel("Tracking Filter:"))
         
         self.cb_filter_select = QComboBox()
         self.cb_filter_select.addItems(FilterFactory.get_available_filters())
-        # Setze Standard auf Homography (Index 1)
         self.cb_filter_select.setCurrentIndex(0)
         self.cb_filter_select.currentTextChanged.connect(self.change_filter)
         
         self.cb_glare = QPushButton("SIMULATE GLARE (Blind)")
         self.cb_glare.setCheckable(True)
-        self.cb_glare.setStyleSheet("background-color : red") # Warnfarbe
+        self.cb_glare.setStyleSheet("background-color : red")
         self.cb_glare.clicked.connect(self.toggle_glare)
         
         noise_layout = QHBoxLayout()
         noise_layout.addWidget(QLabel("Noise:"))
         self.sl_noise = QSlider(Qt.Horizontal)
-        self.sl_noise.setRange(0, 20) # 0 bis 20 Pixel Rauschen
+        self.sl_noise.setRange(0, 20)
         self.sl_noise.valueChanged.connect(self.set_noise)
         noise_layout.addWidget(self.sl_noise)
 
         filter_layout.addWidget(self.cb_filter_select)
         
-        # NEU: Ein Container für die dynamischen Parameter des aktiven Filters
         self.filter_params_group = QGroupBox("Filter Parameters")
         self.filter_params_layout = QVBoxLayout()
         self.filter_params_group.setLayout(self.filter_params_layout)
         filter_layout.addWidget(self.filter_params_group)
-        self.filter_params_group.hide() # Zunächst verstecken, bis ein Filter gewählt ist
+        self.filter_params_group.hide()
 
         filter_layout.addLayout(noise_layout)
         filter_layout.addWidget(self.cb_glare)
@@ -214,7 +247,7 @@ class SimulatorGUI(QMainWindow):
         reset_group = QGroupBox("Reset")
         reset_layout = QVBoxLayout()
         self.btn_reset = QPushButton("Reset Simulation")
-        self.btn_reset.setStyleSheet("background-color : #f0ad4e") # Leicht orange zur Warnung
+        self.btn_reset.setStyleSheet("background-color : #f0ad4e")
         self.btn_reset.clicked.connect(self.reset_simulation)
         reset_layout.addWidget(self.btn_reset)
         reset_group.setLayout(reset_layout)
@@ -257,6 +290,12 @@ class SimulatorGUI(QMainWindow):
             # bevor die erste Regler-Geschwindigkeit berechnet wird.
             if self.active_filter is not None:
                 self.active_filter.force_relocalization()
+
+            # --- Plot-Daten zurücksetzen ---
+            self.plot_data_time = []
+            self.plot_data_error = []
+            self.plot_data_vel = []
+            self.frame_counter = 0
         else:
             self.btn_toggle_servo.setText("Start Servoing")
             for s in self.sliders: s.setEnabled(True)
@@ -341,13 +380,13 @@ class SimulatorGUI(QMainWindow):
                     self.active_filter.Q_scalar = 1.0
                     self.active_filter.R_scalar = 50.0
                     self.active_filter.gate_thresh = 20.0
-                elif filter_name == "Error-State Kalman Filter":
-                    self.active_filter.Q_scalar = 0.01
-                    self.active_filter.R_scalar = 1.0
-                    self.active_filter.gate_thresh = 20.0
                 elif filter_name == "Unscented Kalman Filter":
-                    self.active_filter.Q_scalar = 0.01
-                    self.active_filter.R_scalar = 1.0
+                    self.active_filter.Q_scalar = 1.0
+                    self.active_filter.R_scalar = 50.0
+                    self.active_filter.gate_thresh = 20.0
+                elif filter_name == "Error-State Kalman Filter":
+                    self.active_filter.Q_scalar = 1.0
+                    self.active_filter.R_scalar = 50.0
                     self.active_filter.gate_thresh = 20.0
 
                 # Q-Parameter (Prozessrauschen)
@@ -525,6 +564,41 @@ class SimulatorGUI(QMainWindow):
                 for s in self.sliders: 
                     s.setEnabled(True)
                 self.update_sliders_from_robot()
+
+            # --- Live Plotting Updates ---
+            if self.desired_features is not None and self.current_raw_features is not None and self.active_filter is not None:
+                # Wir müssen sicherstellen, dass wir gleich viele Punkte vergleichen.
+                # In IBVS nutzt der Regler oft den Fehlervektor 'error' direkt.
+                # Wenn dein Regler 'error' zurückgibt, nimm einfach dessen Norm!
+                # Alternativ manueller RMSE der getrackten Punkte:
+                
+                # Nimm einfach die L2-Norm der berechneten Kamerageschwindigkeit
+                vel_norm = np.linalg.norm(v_cam_cmd)
+                
+                # Näherung für den Feature-Fehler (Länge des IBVS-Error-Vektors)
+                # Da du error in ibvs.py berechnest, musst du ihn dir in gui_main holen, 
+                # oder wir berechnen hier grob den Pixel-Abstand der Proxy-Punkte:
+                proj_pts = self.active_filter.get_projected_points(self.desired_features)
+                if proj_pts.shape == self.desired_features.shape:
+                    rmse = np.sqrt(np.mean((proj_pts - self.desired_features)**2))
+                else:
+                    rmse = 0.0
+
+                self.frame_counter += 1
+                self.plot_data_time.append(self.frame_counter)
+                self.plot_data_error.append(rmse)
+                self.plot_data_vel.append(vel_norm)
+
+                # Nur die letzten 200 Frames anzeigen, damit es flüssig läuft
+                max_points = 200
+                if len(self.plot_data_time) > max_points:
+                    self.plot_data_time.pop(0)
+                    self.plot_data_error.pop(0)
+                    self.plot_data_vel.pop(0)
+
+                # Zeichnen!
+                self.curve_error.setData(self.plot_data_time, self.plot_data_error)
+                self.curve_vel.setData(self.plot_data_time, self.plot_data_vel)
         else:
             self.current_q_dot = np.zeros(6)
 
