@@ -5,3 +5,6 @@ accelerated_features/
 *.aux
 *.log
 *.synctex.gz
+*.bbl
+*.bcf
+*.blg
