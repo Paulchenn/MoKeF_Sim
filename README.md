@@ -1,4 +1,4 @@
-# modelfilter_ibvs
+# MoKeF - Simulation
 
 **modelfilter_ibvs** is a lightweight Python framework and simulator for
 image‑based visual servoing (IBVS) with homography estimation.  The
